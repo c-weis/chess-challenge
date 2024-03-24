@@ -1,5 +1,4 @@
 ﻿using ChessChallenge.API;
-using Microsoft.VisualBasic;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -9,7 +8,14 @@ public class MyBot : IChessBot
     static int ExtraCaptureDepth = 2;
     public Move Think(Board board, Timer timer)
     {
-        return BestMoveRecursive(board, 4, float.PositiveInfinity).Item1;
+        var depth = 4;
+        if(timer.MillisecondsRemaining < 10_000) {
+            depth = 3;
+            if(timer.MillisecondsRemaining < 1_000) {
+                depth = 2;
+            }
+        }
+        return BestMoveRecursive(board, depth, float.NegativeInfinity, float.PositiveInfinity).Item1;
     }
 
     private static int MoveOrder(Board board, Move move){
@@ -24,14 +30,15 @@ public class MyBot : IChessBot
         return order;
     }
 
-    public (Move, float) BestMoveRecursive(Board board, int depth, float cutoff){
+    public (Move, float) BestMoveRecursive(Board board, int depth, 
+                                            float bestPlayerEval, float bestOpponentEval){
         if (board.IsInCheckmate()) return (default, float.NegativeInfinity);
         if (board.IsDraw()) return (default, 0);
         if (depth == -ExtraCaptureDepth) return (default, EvaluateBoard(board));
 
         var moves = board.GetLegalMoves(depth<=0); // if depth is <= 0, get captures only
         if (!moves.Any()) return (default, EvaluateBoard(board));
-        var sortedMoves = moves.OrderByDescending(move => MoveOrder(board, move));
+        var sortedMoves = (depth > 1) ? moves.OrderByDescending(move => MoveOrder(board, move)) : moves.AsEnumerable();
 
         float bestEval = float.NegativeInfinity;
         Move bestMove = sortedMoves.First();
@@ -40,14 +47,16 @@ public class MyBot : IChessBot
             var eval = - BestMoveRecursive(
                                     board, 
                                     depth-1,
-                                    -bestEval
+                                    -bestOpponentEval,
+                                    -bestPlayerEval
                                     ).Item2;
             if(eval > bestEval) {
+                bestPlayerEval = Math.Max(bestPlayerEval, eval);
                 bestEval = eval;
                 bestMove = move;
-                if(bestEval > cutoff){
+                if(bestEval > bestOpponentEval){
                     board.UndoMove(move);
-                    return (default, eval);
+                    return (default, bestEval);
                 }
             }
             board.UndoMove(move);
