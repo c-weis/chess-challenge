@@ -1,113 +1,176 @@
 ﻿using ChessChallenge.API;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 
 public class MyBot : IChessBot
 {
-    static int ExtraCaptureDepth = 2;
-    public Move Think(Board board, Timer timer)
-    {
-        var depth = 4;
-        if(timer.MillisecondsRemaining < 10_000) {
-            depth = 3;
-            if(timer.MillisecondsRemaining < 1_000) {
-                depth = 2;
+    static int ExplorationDepth = 5;
+    static int ExtraCaptureDepth = 1;
+    static float[,,] WhitePieceValues;
+    static Dictionary<ulong, (int, float)> PreviousEvaluations; // sends (board Zobrist key) => (depth, evaluation obtained previously at that depth)
+    static MyBot(){
+        // create lookup tables for piece values
+        WhitePieceValues = new float[5,8,8];
+
+        // values before centre bonus
+        foreach(var file in Enumerable.Range(0,8)){
+            foreach(var rank in Enumerable.Range(0,8)){
+                // Pawn values
+                WhitePieceValues[0, file, rank] = 1.0f + rank * 1e-3f;
+                // Knight values
+                WhitePieceValues[1, file, rank] = 3.0f + (rank != 0 ? 1e-3f : 0);
+                // Bishop values
+                WhitePieceValues[2, file, rank] = 3.3f + (rank != 0 ? 1e-3f : 0);
+                // Rook values
+                WhitePieceValues[3, file, rank] = 5.0f + (rank != 0 ? 1e-3f : 0);
+                // Queen values
+                WhitePieceValues[4, file, rank] = 9.0f + (rank != 0 ? 1e-3f : 0);
             }
         }
-        return BestMoveRecursive(board, depth, float.NegativeInfinity, float.PositiveInfinity).Item1;
+
+        // add centre bonus
+        // pawns and knights
+        foreach (var pieceID in Enumerable.Range(0,2)){
+            WhitePieceValues[pieceID,3,3] += 1e-2f;
+            WhitePieceValues[pieceID,3,4] += 1e-2f;
+            WhitePieceValues[pieceID,4,3] += 1e-2f;
+            WhitePieceValues[pieceID,4,4] += 1e-2f;
+        }
+
+        PreviousEvaluations = new();
     }
 
-    private static int MoveOrder(Board board, Move move){
+    public Move Think(Board board, Timer timer)
+    {
+        // FIND BEST MOVE
+        // Fetch allowed moves and sort them
+        var sortedMoves = board.GetLegalMoves().OrderByDescending(move => MoveEvaluationOrder(board, move));
+
+        // Loop through moves and evaluate them
+        float bestEval = float.NegativeInfinity;
+        Move bestMove = sortedMoves.First();
+        foreach(var move in sortedMoves){
+            // adapt depth based on time remaining
+            if(timer.MillisecondsRemaining > 10_000) {
+                if(board.PlyCount < 10){
+                    ExplorationDepth = 2;
+                    ExtraCaptureDepth = 5;
+                } else {
+                    ExplorationDepth = 5;
+                    ExtraCaptureDepth = 2;
+                }
+            }else{
+                ExplorationDepth = 3;
+                ExtraCaptureDepth = 1;
+                if(timer.MillisecondsRemaining < 1_000) {
+                    ExtraCaptureDepth = 0;
+                }
+            }
+
+            // evaluate move to given depth
+            board.MakeMove(move);
+            var eval = - EvaluateRecursively(
+                                    board, 
+                                    ExplorationDepth-1,
+                                    float.NegativeInfinity,
+                                    -bestEval
+                                    );
+            if(eval > bestEval) {
+                bestEval = eval;
+                bestMove = move;
+            }
+            board.UndoMove(move);
+        }
+
+        return bestMove;
+    }
+
+    private static int MoveEvaluationOrder(Board board, Move move){
         board.MakeMove(move);
 
         var order = -board.GetLegalMoves().Length;
-        order += board.IsInCheckmate() ? 100 : 0;
-        order += board.IsInCheck() ? 50 : 0;
-        order += move.IsCapture ? 25 : 0;
+        order += board.IsInCheckmate() ? 1000 : 0;
+        order += board.IsInCheck() ? 500 : 0;
+        order += move.IsCapture ? 250 : 0;
 
         board.UndoMove(move);
         return order;
     }
 
-    public (Move, float) BestMoveRecursive(Board board, int depth, 
+    public float EvaluateRecursively(Board board, int depth, 
                                             float bestPlayerEval, float bestOpponentEval){
-        if (board.IsInCheckmate()) return (default, float.NegativeInfinity);
-        if (board.IsDraw()) return (default, 0);
-        if (depth == -ExtraCaptureDepth) return (default, EvaluateBoard(board));
+        // Deal with trivial cases first: checkmate, draw
+        if (board.IsInCheckmate()) return float.NegativeInfinity;
+        if (board.IsDraw()) return 0;
 
+        // See if we evaluated this position already at sufficient depth
+        var zobristKey = board.ZobristKey;
+        if(PreviousEvaluations.TryGetValue(zobristKey, out var depth_eval)){
+            // we have seen this position before - check depth
+            if(depth_eval.Item1 >= depth){
+                return depth_eval.Item2;
+            }
+            // else carry on - the position needs to be reevaluated
+        } else {
+            // add default value so we can replace it later
+            PreviousEvaluations.Add(zobristKey, default);
+        }
+
+        // Check if we need to stop the search for depth reasons
+        if (depth == -ExtraCaptureDepth) return EvaluateBoard(board, depth, zobristKey);
         var moves = board.GetLegalMoves(depth<=0); // if depth is <= 0, get captures only
-        if (!moves.Any()) return (default, EvaluateBoard(board));
-        var sortedMoves = (depth > 1) ? moves.OrderByDescending(move => MoveOrder(board, move)) : moves.AsEnumerable();
+        if (!moves.Any()) return EvaluateBoard(board, depth, zobristKey);
 
+        // Sort moves (if remaining depth > 1)
+        var sortedMoves = (depth > 1) ? moves.OrderByDescending(move => MoveEvaluationOrder(board, move)) 
+                                        : moves.AsEnumerable();
+
+        // Loop through moves, recursively calling this function and employing alpha-beta pruning
         float bestEval = float.NegativeInfinity;
-        Move bestMove = sortedMoves.First();
         foreach(var move in sortedMoves){
             board.MakeMove(move);
-            var eval = - BestMoveRecursive(
+            var eval = - EvaluateRecursively(
                                     board, 
                                     depth-1,
                                     -bestOpponentEval,
                                     -bestPlayerEval
-                                    ).Item2;
+                                    );
+            board.UndoMove(move);
             if(eval > bestEval) {
                 bestPlayerEval = Math.Max(bestPlayerEval, eval);
                 bestEval = eval;
-                bestMove = move;
-                if(bestEval > bestOpponentEval){
-                    board.UndoMove(move);
-                    return (default, bestEval);
-                }
+                if(bestEval > bestOpponentEval) break;
             }
-            board.UndoMove(move);
         }
 
-        return (bestMove, bestEval);
+        // Store evaluation in dictionary - we made sure the key exists earlier
+        PreviousEvaluations[zobristKey] = (depth, bestEval);
+
+        return bestEval;
     }
 
-    private float EvaluatePawn(Piece piece){
-        Square square = piece.Square;
-        float centreBonus = 7.0f - (Math.Abs(square.Rank-3.5f) + Math.Abs(square.File-3.5f));
-        if(piece.IsWhite) { // add promotionBonus
-            return 1.0f + centreBonus/50.0f + square.Rank/100.0f;
-        }
-        return 1.0f + centreBonus/50.0f + (7.0f - square.Rank)/100.0f;
-    }
-    private float EvaluateKnight(Piece piece){
-        Square square = piece.Square;
-        float centreBonus = 7.0f - (Math.Abs(square.Rank-3.5f) + Math.Abs(square.File-3.5f));
-        return 3.0f + centreBonus/50.0f;
-    }
-    private float EvaluateBishop(Piece piece){
-        return 3.3f;
-    }
-    private float EvaluateRook(Piece piece){
-        return 5.0f;
-    }
-    private float EvaluateQueen(Piece piece){
-        return 9.0f;
-    }
 
-    private float EvaluateBoard(Board board) {
-        var sum = 0.0f;
+    private float EvaluateBoard(Board board, int storageDepth, ulong zobristKey) {
+        var evaluationForWhite = 0.0f;
         var pieceLists = board.GetAllPieceLists();
 
-        sum += pieceLists[0].Sum(EvaluatePawn);
-        sum += pieceLists[1].Sum(EvaluateKnight);
-        sum += pieceLists[2].Sum(EvaluateBishop);
-        sum += pieceLists[3].Sum(EvaluateRook);
-        sum += pieceLists[4].Sum(EvaluateQueen);
-        sum -= pieceLists[6].Sum(EvaluatePawn);
-        sum -= pieceLists[7].Sum(EvaluateKnight);
-        sum -= pieceLists[8].Sum(EvaluateBishop);
-        sum -= pieceLists[9].Sum(EvaluateRook);
-        sum -= pieceLists[10].Sum(EvaluateQueen);
+        foreach(int i in Enumerable.Range(0, 5)){
+            // White piece values
+            foreach(var piece in pieceLists[i])
+                evaluationForWhite += WhitePieceValues[i,piece.Square.File,piece.Square.Rank];
+            // Black piece values (flip board vertically)
+            foreach(var piece in pieceLists[6+i])
+                evaluationForWhite -= WhitePieceValues[i,piece.Square.File,7-piece.Square.Rank];
+        }
 
-        return Multiplier(board) * sum;
+        var totalEvaluation = 
+            (board.IsWhiteToMove ? 1.0f : -1.0f) * evaluationForWhite
+            - (board.IsInCheck() ? 1e-5f : 0.0f); // bias against being in check
+
+        PreviousEvaluations[zobristKey] = (storageDepth, totalEvaluation);
+        
+        return totalEvaluation;
     }
-
-    private float Multiplier(Board board){
-        return board.IsWhiteToMove ? 1.0f : -1.0f;
-    }
-
 }
