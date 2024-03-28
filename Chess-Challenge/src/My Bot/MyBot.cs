@@ -3,11 +3,12 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks.Dataflow;
 
 public class MyBot : IChessBot
 {
-    static int ExplorationDepth = 3;
-    static int ExtraCaptureDepth = 1;
+    static int ExplorationDepth = 5;
+    static int ExtraCaptureDepth = 2;
     static float[,,] WhitePieceValues;
     static Dictionary<ulong, (int, float, Move)> PreviousEvaluations; // sends (board Zobrist key) => (depth, evaluation obtained previously at that depth, best Move)
     static MyBot(){
@@ -18,26 +19,26 @@ public class MyBot : IChessBot
         foreach(var file in Enumerable.Range(0,8)){
             foreach(var rank in Enumerable.Range(0,8)){
                 // Pawn values
-                WhitePieceValues[0, file, rank] = 1.0f + rank * 1e-3f;
+                WhitePieceValues[0, file, rank] = 1.0f + rank * 0.005f;
                 // Knight values
-                WhitePieceValues[1, file, rank] = 3.0f + (rank != 0 ? 1e-3f : 0);
+                WhitePieceValues[1, file, rank] = 3.0f + (rank != 0 ? 0.005f : 0);
                 // Bishop values
-                WhitePieceValues[2, file, rank] = 3.3f + (rank != 0 ? 1e-3f : 0);
+                WhitePieceValues[2, file, rank] = 3.3f + (rank != 0 ? 0.005f : 0);
                 // Rook values
-                WhitePieceValues[3, file, rank] = 5.0f + (rank != 0 ? 1e-3f : 0);
+                WhitePieceValues[3, file, rank] = 5.0f + (rank != 0 ? 0.003f : 0);
                 // Queen values
-                WhitePieceValues[4, file, rank] = 9.0f + (rank != 0 ? 1e-3f : 0);
+                WhitePieceValues[4, file, rank] = 9.0f + (rank != 0 ? 0.001f : 0);
             }
         }
 
         // add centre bonus
         // pawns and knights
-        foreach (var pieceID in Enumerable.Range(0,2)){
-            WhitePieceValues[pieceID,3,3] += 1e-2f;
-            WhitePieceValues[pieceID,3,4] += 1e-2f;
-            WhitePieceValues[pieceID,4,3] += 1e-2f;
-            WhitePieceValues[pieceID,4,4] += 1e-2f;
-        }
+            foreach (var rank in Enumerable.Range(3,5)){
+                foreach (var file in Enumerable.Range(3,4)){
+                    WhitePieceValues[0,rank,file] += 0.01f;
+                    WhitePieceValues[1,rank,file] += 0.02f;
+                }
+            }
 
         PreviousEvaluations = new();
     }
@@ -48,31 +49,18 @@ public class MyBot : IChessBot
         // Fetch allowed moves and sort them
         var sortedMoves = board.GetLegalMoves().OrderByDescending(move => MoveEvaluationOrder(board, move));
 
-//        // adapt depth based on time remaining
-//        if(timer.MillisecondsRemaining > 10_000) {
-//            if(board.PlyCount < 10){
-//                ExplorationDepth = 2;
-//                ExtraCaptureDepth = 5;
-//            } else {
-//                ExplorationDepth = 5;
-//                ExtraCaptureDepth = 2;
-//            }
-//        }else{
-//            ExplorationDepth = 3;
-//            ExtraCaptureDepth = 1;
-//            if(timer.MillisecondsRemaining < 1_000) {
-//                ExtraCaptureDepth = 0;
-//            }
-//        }
+        // adapt depth based on time remaining
+        DepthDecider(board, timer);
 
-        Move bestMove;
         // On the top level we don't check the table
-        bestMove = EvaluateCheckTable(
+        Move bestMove = EvaluateCheckTable(
                                     board, 
                                     ExplorationDepth,
                                     float.NegativeInfinity,
                                     float.PositiveInfinity
                                     ).Item2;
+        
+        // Console.WriteLine(timer.MillisecondsElapsedThisTurn);
 
         return bestMove;
     }
@@ -84,6 +72,8 @@ public class MyBot : IChessBot
         order += board.IsInCheckmate() ? 1000 : 0;
         order += board.IsInCheck() ? 500 : 0;
         order += move.IsCapture ? 250 : 0;
+
+        // order += (int)( 50 * EvaluateBoard(board));
 
         board.UndoMove(move);
         return order;
@@ -158,7 +148,7 @@ public class MyBot : IChessBot
         return (bestEval, bestMove);
     }
 
-    private float EvaluateBoard(Board board) {
+    private static float EvaluateBoard(Board board) {
         var evaluationForWhite = 0.0f;
         var pieceLists = board.GetAllPieceLists();
 
@@ -176,5 +166,27 @@ public class MyBot : IChessBot
             - (board.IsInCheck() ? 1e-5f : 0.0f); // bias against being in check
 
         return totalEvaluation;
+    }
+
+    private void DepthDecider(Board board, Timer timer){
+        if(timer.MillisecondsRemaining > 10_000) {
+            if(board.PlyCount < 10){
+                ExplorationDepth = 3;
+                ExtraCaptureDepth = 4;
+            } else {
+                ExplorationDepth = 4;
+                ExtraCaptureDepth = 2;
+            }
+        }else{
+            ExplorationDepth = 3;
+            ExtraCaptureDepth = 1;
+            if(timer.MillisecondsRemaining < 1_000) {
+                ExtraCaptureDepth = 0;
+            }
+            else if (timer.MillisecondsRemaining < 100) {
+                ExplorationDepth = 2;
+            }
+        }
+        return;
     }
 }
