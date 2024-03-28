@@ -66,7 +66,8 @@ public class MyBot : IChessBot
 //        }
 
         Move bestMove;
-        bestMove = EvaluateRecursively(
+        // On the top level we don't check the table
+        bestMove = EvaluateCheckTable(
                                     board, 
                                     ExplorationDepth,
                                     float.NegativeInfinity,
@@ -109,7 +110,7 @@ public class MyBot : IChessBot
         // Loop through moves, recursively calling this function and employing alpha-beta pruning
         foreach(var move in sortedMoves){
             board.MakeMove(move);
-            var eval = - EvaluateRecursively(
+            var eval = - EvaluateCheckTable(
                                     board, 
                                     depth-1,
                                     -upperCutoff,
@@ -133,12 +134,16 @@ public class MyBot : IChessBot
     public (float, Move) EvaluateCheckTable(Board board, int depth, 
                                             float lowerCutoff, float upperCutoff){
         // First, see if we evaluated this position already at sufficient depth
-        var zobristKey = board.ZobristKey;
+        // XOR with plycount to account for repetitions
+        var zobristKey = board.ZobristKey ^ (ulong)(board.PlyCount);
+        // Every evaluation is stored from white's perspective
+        var whiteMultiplier = (board.IsWhiteToMove ? 1.0f : -1.0f);
+
         Boolean keyExisted = false;
         if(PreviousEvaluations.TryGetValue(zobristKey, out var depth_eval)){
             // we have seen this position before - check depth
             if(depth_eval.Item1 >= depth){
-                return (depth_eval.Item2, depth_eval.Item3);
+                return (depth_eval.Item2 * whiteMultiplier, depth_eval.Item3);
             }
             keyExisted = true;
             // else carry on - the position needs to be reevaluated
@@ -148,7 +153,7 @@ public class MyBot : IChessBot
         if (lowerCutoff <= bestEval && bestEval <= upperCutoff) {
             // This evaluation was not cutoff and can be trusted, so we save it.
             if (!keyExisted) PreviousEvaluations.Add(zobristKey, default);
-            PreviousEvaluations[zobristKey] = (depth, bestEval, bestMove);
+            PreviousEvaluations[zobristKey] = (depth, bestEval*whiteMultiplier, bestMove);
         }
         return (bestEval, bestMove);
     }
