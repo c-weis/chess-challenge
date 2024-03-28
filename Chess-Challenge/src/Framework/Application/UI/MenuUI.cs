@@ -2,6 +2,8 @@
 using System.Numerics;
 using System;
 using System.IO;
+using System.Reflection;
+using System.Linq;
 
 namespace ChessChallenge.Application
 {
@@ -68,6 +70,20 @@ namespace ChessChallenge.Application
             if (NextButtonInRow("Exit (ESC)", ref buttonPos, spacing, buttonSize))
             {
                 Environment.Exit(0);
+            }
+
+            // additional buttons on right hand side
+            buttonPos = UIHelper.Scale(new Vector2(1660, 210));
+            var assembly = Assembly.GetExecutingAssembly();
+            var evilBots = assembly.GetTypes().Where(
+                    type => string.Equals(type.Namespace, "ChessChallenge.EvilBots", StringComparison.Ordinal)
+                    );
+
+            foreach (Type evilBot in evilBots){
+                if (NextButtonInRow($"MyBot vs {evilBot.Name}", ref buttonPos, spacing, buttonSize))
+                {
+                    controller.StartNewBotMatch(ChallengeController.PlayerType.MyBot, ChallengeController.PlayerType.EvilBot, evilBot);
+                }
             }
 
             bool NextButtonInRow(string name, ref Vector2 pos, float spacingY, Vector2 size)

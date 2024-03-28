@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 
 namespace ChessChallenge.EvilBots;
-public class EvilBot : IChessBot
+public class EvilBot2 : IChessBot
 {
     public Move Think(Board board, Timer timer)
     {
