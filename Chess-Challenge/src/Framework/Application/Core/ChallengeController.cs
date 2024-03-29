@@ -30,6 +30,7 @@ namespace ChessChallenge.Application
         Board board;
         public ChessPlayer PlayerWhite { get; private set; }
         public ChessPlayer PlayerBlack {get;private set;}
+        private Type? EvilBotType = default;
 
         float lastMoveMadeTime;
         bool isWaitingToPlayMove;
@@ -77,54 +78,6 @@ namespace ChessChallenge.Application
             StartNewGame(PlayerType.Human, PlayerType.MyBot);
         }
 
-        public void StartNewGame(PlayerType whiteType, PlayerType blackType, Type? evilBotType = default)
-        {
-            // End any ongoing game
-            EndGame(GameResult.DrawByArbiter, log: false, autoStartNextBotMatch: false);
-            gameID = rng.Next();
-
-            // Stop prev task and create a new one
-            if (RunBotsOnSeparateThread)
-            {
-                // Allow task to terminate
-                botTaskWaitHandle.Set();
-                // Create new task
-                botTaskWaitHandle = new AutoResetEvent(false);
-                Task.Factory.StartNew(BotThinkerThread, TaskCreationOptions.LongRunning);
-            }
-
-            // Board Setup
-            board = new Board();
-            bool isGameWithHuman = whiteType is PlayerType.Human || blackType is PlayerType.Human;
-            int fenIndex = isGameWithHuman ? 0 : botMatchGameIndex / 2;
-            board.LoadPosition(botMatchStartFens[fenIndex]);
-
-            // Player Setup
-            PlayerWhite = CreatePlayer(whiteType);
-            PlayerBlack = CreatePlayer(blackType);
-            if(evilBotType != default){
-                var evilPlayer = new ChessPlayer(Activator.CreateInstance(evilBotType), PlayerType.EvilBot, GameDurationMilliseconds);
-                if(whiteType == PlayerType.EvilBot){
-                    PlayerWhite = evilPlayer;
-                }
-                else if(blackType == PlayerType.EvilBot) {
-                    PlayerBlack = evilPlayer;
-                }
-            }
-
-            PlayerWhite.SubscribeToMoveChosenEventIfHuman(OnMoveChosen);
-            PlayerBlack.SubscribeToMoveChosenEventIfHuman(OnMoveChosen);
-
-            // UI Setup
-            boardUI.UpdatePosition(board);
-            boardUI.ResetSquareColours();
-            SetBoardPerspective();
-
-            // Start
-            isPlaying = true;
-            NotifyTurnToMove();
-        }
-
         public void StartNewGame(PlayerType whiteType, PlayerType blackType)
         {
             // End any ongoing game
@@ -140,6 +93,7 @@ namespace ChessChallenge.Application
                 botTaskWaitHandle = new AutoResetEvent(false);
                 Task.Factory.StartNew(BotThinkerThread, TaskCreationOptions.LongRunning);
             }
+
             // Board Setup
             board = new Board();
             bool isGameWithHuman = whiteType is PlayerType.Human || blackType is PlayerType.Human;
@@ -149,6 +103,7 @@ namespace ChessChallenge.Application
             // Player Setup
             PlayerWhite = CreatePlayer(whiteType);
             PlayerBlack = CreatePlayer(blackType);
+
             PlayerWhite.SubscribeToMoveChosenEventIfHuman(OnMoveChosen);
             PlayerBlack.SubscribeToMoveChosenEventIfHuman(OnMoveChosen);
 
@@ -208,8 +163,6 @@ namespace ChessChallenge.Application
             return Move.NullMove;
         }
 
-
-
         void NotifyTurnToMove()
         {
             //playerToMove.NotifyTurnToMove(board);
@@ -258,7 +211,7 @@ namespace ChessChallenge.Application
             return type switch
             {
                 PlayerType.MyBot => new ChessPlayer(new MyBot(), type, GameDurationMilliseconds),
-                PlayerType.EvilBot => new ChessPlayer(new EvilBot(), type, GameDurationMilliseconds),
+                PlayerType.EvilBot => new ChessPlayer(Activator.CreateInstance(EvilBotType??typeof(EvilBot)), type, GameDurationMilliseconds),
                 _ => new ChessPlayer(new HumanPlayer(boardUI), type)
             };
         }
@@ -443,13 +396,15 @@ namespace ChessChallenge.Application
             MatchStatsUI.DrawMatchStats(this);
         }
 
-        static string GetPlayerName(ChessPlayer player) => GetPlayerName(player.PlayerType);
-        static string GetPlayerName(PlayerType type) => type.ToString();
-        static string GetPlayerName(Type type) => type.Name;
+        public string GetPlayerName(ChessPlayer player) => GetPlayerName(player.PlayerType);
+        private string GetPlayerName(PlayerType type) => (type==PlayerType.EvilBot)?(EvilBotType?.Name??"EvilBot"):type.ToString();
 
-        public void StartNewBotMatch(PlayerType botTypeA, PlayerType botTypeB)
+        public void StartNewBotMatch(PlayerType botTypeA, PlayerType botTypeB, Type? evilBotType = null)
         {
             EndGame(GameResult.DrawByArbiter, log: false, autoStartNextBotMatch: false);
+            
+            EvilBotType = evilBotType??typeof(EvilBot);
+
             botMatchGameIndex = 0;
             string nameA = GetPlayerName(botTypeA);
             string nameB = GetPlayerName(botTypeB);
@@ -463,23 +418,6 @@ namespace ChessChallenge.Application
             botAPlaysWhite = true;
             Log($"Starting new match: {nameA} vs {nameB}", false, ConsoleColor.Blue);
             StartNewGame(botTypeA, botTypeB);
-        }
-        public void StartNewBotMatch(PlayerType botTypeA, PlayerType botTypeB, Type? evilBotType = null)
-        {
-            EndGame(GameResult.DrawByArbiter, log: false, autoStartNextBotMatch: false);
-            botMatchGameIndex = 0;
-            string nameA = (evilBotType==null || botTypeA != PlayerType.EvilBot) ? GetPlayerName(botTypeA) : GetPlayerName(evilBotType);
-            string nameB = (evilBotType==null || botTypeB != PlayerType.EvilBot) ? GetPlayerName(botTypeB) : GetPlayerName(evilBotType);
-            if (nameA == nameB)
-            {
-                nameA += " (A)";
-                nameB += " (B)";
-            }
-            BotStatsA = new BotMatchStats(nameA);
-            BotStatsB = new BotMatchStats(nameB);
-            botAPlaysWhite = true;
-            Log($"Starting new match: {nameA} vs {nameB}", false, ConsoleColor.Blue);
-            StartNewGame(botTypeA, botTypeB, evilBotType);
         }
 
         ChessPlayer PlayerToMove => board.IsWhiteToMove ? PlayerWhite : PlayerBlack;
