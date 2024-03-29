@@ -11,8 +11,10 @@ namespace ChessChallenge.Application
     {
         public static void DrawButtons(ChallengeController controller)
         {
-            Vector2 buttonPos = UIHelper.Scale(new Vector2(260, 210));
-            Vector2 buttonSize = UIHelper.Scale(new Vector2(260, 55));
+            int buttonHalfWidth = 120;
+            int buttonHalfHeight = 30;
+            Vector2 buttonPos = UIHelper.Scale(new Vector2(1.15f * buttonHalfWidth, 200));
+            Vector2 buttonSize = UIHelper.Scale(new Vector2(2 * buttonHalfWidth, 2 * buttonHalfHeight));
             float spacing = buttonSize.Y * 1.2f;
             float breakSpacing = spacing * 0.6f;
 
@@ -73,14 +75,17 @@ namespace ChessChallenge.Application
             }
 
             // additional buttons on right hand side
-            buttonPos = UIHelper.Scale(new Vector2(1660, 210));
+            buttonPos = UIHelper.Scale(new Vector2(3.25f * buttonHalfWidth, 2 * buttonHalfHeight));
             var assembly = Assembly.GetExecutingAssembly();
             var evilBots = assembly.GetTypes().Where(
-                    type => string.Equals(type.Namespace, "ChessChallenge.EvilBots", StringComparison.Ordinal)
-                    );
+                    type => type.IsVisible && string.Equals(type.Namespace, "ChessChallenge.EvilBots", StringComparison.Ordinal)
+                    ).OrderBy(t => t.Name);
+
+            UIHelper.DrawText("MyBot VS ___ :", buttonPos, UIHelper.ScaleInt(32), 1, Color.WHITE, UIHelper.AlignH.Centre);
+            buttonPos.Y += spacing;
 
             foreach (Type evilBot in evilBots){
-                if (NextButtonInRow($"MyBot vs {evilBot.Name}", ref buttonPos, spacing, buttonSize))
+                if (NextButtonInRow($"{evilBot.Name}", ref buttonPos, spacing, buttonSize))
                 {
                     controller.StartNewBotMatch(ChallengeController.PlayerType.MyBot, ChallengeController.PlayerType.EvilBot, evilBot);
                 }

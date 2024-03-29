@@ -102,9 +102,6 @@ namespace ChessChallenge.Application
             bool isBigWindow = Raylib.GetScreenWidth() > Settings.ScreenSizeSmall.X;
             File.WriteAllText(FileHelper.PrefsFilePath, isBigWindow ? "1" : "0");
         }
-
-      
-
     }
 
 
