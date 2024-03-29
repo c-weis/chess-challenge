@@ -9,7 +9,7 @@ public class EvilBot : IChessBot
 {
     public Move Think(Board board, Timer timer)
     {
-        return BestMoveRecursive(board, 4).Item1;
+        return BestMoveRecursive(board, 3).Item1;
     }
 
     public (Move, float) BestMoveRecursive(Board board, int depth){
