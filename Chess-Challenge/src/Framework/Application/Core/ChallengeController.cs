@@ -11,6 +11,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using static ChessChallenge.Application.Settings;
 using static ChessChallenge.Application.ConsoleHelper;
+using System.Diagnostics;
+using System.Collections.Generic;
 
 namespace ChessChallenge.Application
 {
@@ -152,6 +154,11 @@ namespace ChessChallenge.Application
             {
                 API.Timer timer = new(PlayerToMove.TimeRemainingMs, PlayerNotOnMove.TimeRemainingMs, GameDurationMilliseconds, IncrementMilliseconds);
                 API.Move move = PlayerToMove.Bot.Think(botBoard, timer);
+                if(PlayerToMove.PlayerType == PlayerType.MyBot) {
+                    // cast IBot to MyBot
+                    MyBot outputBot = (MyBot)PlayerToMove.Bot; 
+                    OutputValuation(outputBot.LastValuation, board);
+                }
                 return new Move(move.RawValue);
             }
             catch (Exception e)
@@ -161,6 +168,41 @@ namespace ChessChallenge.Application
                 botExInfo = ExceptionDispatchInfo.Capture(e);
             }
             return Move.NullMove;
+        }
+
+        private void OutputValuation(Valuation valuation, Board board)
+        {
+            StringBuilder stringBuilder = new(
+                $"{valuation.Evaluation:0.00} ({valuation.Depth}+{valuation.ExtraDepth}) "
+            );
+
+            // convert API type moves to equivalent Chess.Move member and keep track of ply count
+            // reverse order because the moves are stored in reverse in Valuation.Line
+            List<(int, Move)> enumeratedValuationMoves = 
+                Enumerable
+                    .Reverse(valuation.Line)
+                    .Select(
+                        (apiMove, index) => (board.plyCount + index + 1, new Move(apiMove.RawValue))
+            ).ToList();
+
+            // iterate through moves in line and append their SAN name decorated with move count
+            // special case: if the bot is black, start printing line with X...
+            if (!board.IsWhiteToMove) stringBuilder.Append($"{(board.plyCount+1)/2}..."); 
+            foreach (var (plyNumber, move) in enumeratedValuationMoves){
+                if(plyNumber%2==1) stringBuilder.Append($"{(plyNumber+1)/2}.");
+                stringBuilder.Append(
+                    $"{MoveUtility.GetMoveNameSAN(move, board)} "
+                );
+                board.MakeMove(move, inSearch: true);
+            }
+
+            // now undo all the moves
+            foreach (var (_, move) in Enumerable.Reverse(enumeratedValuationMoves)){
+                board.UndoMove(move, inSearch: true);
+            }
+
+            // output line
+            Debug.WriteLine(stringBuilder.ToString());
         }
 
         void NotifyTurnToMove()
