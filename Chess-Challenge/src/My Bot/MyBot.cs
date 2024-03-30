@@ -1,13 +1,8 @@
 ﻿using ChessChallenge.API;
 using Microsoft.CodeAnalysis;
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using System.Runtime.CompilerServices;
-using System.Security.Authentication.ExtendedProtection;
-using System.Threading.Tasks.Dataflow;
-using System.Xml;
 
 public class MyBot : IChessBot
 {
@@ -15,9 +10,11 @@ public class MyBot : IChessBot
     static int ExtraCaptureDepth = 0;
     static float CheckMateValue = 1e6f; // Large, but finite value for checkmate.
     static float[,,] WhitePieceValues;
-    static Dictionary<ulong, Valuation> PreviousEvaluations; // sends (board Zobrist key) => (depth, evaluation containing eval, depth, line of best moves)
+    private Dictionary<ulong, Valuation> PreviousEvaluations {get; set;} = new(); // sends (board Zobrist key) => (depth, evaluation containing eval, depth, line of best moves)
+
+    public Valuation LastValuation {get; set;}
     
-    static int BoardCounter = 0;
+    static int BoardEvaluationCounter = 0;
     static int RunningAverage_BoardEvaluations = 0;
 
     static MyBot(){
@@ -49,7 +46,6 @@ public class MyBot : IChessBot
                 }
             }
 
-        PreviousEvaluations = new();
     }
 
     public Move Think(Board board, Timer timer)
@@ -57,10 +53,11 @@ public class MyBot : IChessBot
         // adapt depth based on time remaining
         // DepthDecider(board, timer);
 
-        BoardCounter = 0;
+        // Reset counter of board evaluations
+        BoardEvaluationCounter = 0;
 
         // On the top level we still check the table, mainly to save the top level computations.
-        Valuation valuation = EvaluateCheckTable(
+        LastValuation = EvaluateCheckTable(
                                     board, 
                                     ExplorationDepth,
                                     float.NegativeInfinity,
@@ -71,10 +68,10 @@ public class MyBot : IChessBot
         RunningAverage_BoardEvaluations = (9*RunningAverage_BoardEvaluations + BoardCounter)/10;
 
         // Print valuation and number of boards evaluated
-        Console.WriteLine(valuation.ToString() + " (" +  BoardCounter.ToString("0.0e+0") + ", "
+        Console.WriteLine(LastValuation.ToString() + " (" +  BoardEvaluationCounter.ToString("0.0e+0") + ", "
                                      + RunningAverage_BoardEvaluations.ToString("0.0e+0") + ")");
 
-        return valuation.bestMove();
+        return LastValuation.BestMove();
     }
 
     private static int MoveEvaluationOrder(Board board, Move move){
@@ -118,11 +115,11 @@ public class MyBot : IChessBot
                                     -upperCutoff,
                                     -lowerCutoff
                                     );
-            valuation = valuation.extend(move, depth);
+            valuation = valuation.Extend(move, depth);
             board.UndoMove(move);
-            if(valuation.eval >= bestEval) {
-                lowerCutoff = Math.Max(lowerCutoff, valuation.eval);
-                bestEval = valuation.eval;
+            if(valuation.Evaluation >= bestEval) {
+                lowerCutoff = Math.Max(lowerCutoff, valuation.Evaluation);
+                bestEval = valuation.Evaluation;
                 bestValuation = valuation;
                 if(lowerCutoff > upperCutoff) {
                     // too good to be true. this should not be saved in the PreviousEvaluations
@@ -146,7 +143,7 @@ public class MyBot : IChessBot
         Boolean keyExisted = false;
         if(PreviousEvaluations.TryGetValue(zobristKey, out var previousEval)){
             // we have seen this position before - check depth
-            if(previousEval.depth >= depth){
+            if(previousEval.Depth >= depth){
                 return previousEval;
             }
             keyExisted = true;
@@ -154,7 +151,7 @@ public class MyBot : IChessBot
         } 
 
         var valuation = EvaluateRecursively(board, depth, lowerCutoff, upperCutoff);
-        if (lowerCutoff <= valuation.eval && valuation.eval <= upperCutoff) {
+        if (lowerCutoff <= valuation.Evaluation && valuation.Evaluation <= upperCutoff) {
             // This evaluation was not cutoff and can be trusted, so we save it.
             if (!keyExisted) PreviousEvaluations.Add(zobristKey, default);
             PreviousEvaluations[zobristKey] = valuation;
@@ -180,7 +177,7 @@ public class MyBot : IChessBot
             - (board.IsInCheck() ? 1e-5f : 0.0f); // bias against being in check
 
         // We have evaluated another board, increase counter
-        BoardCounter ++;
+        BoardEvaluationCounter ++;
         return totalEvaluation;
     }
 
@@ -210,38 +207,32 @@ public class MyBot : IChessBot
 
 public struct Valuation {
 
-    public Valuation(float e, int d){ // should also pass depth?
-        eval = e;
-        depth = Math.Min(d,0);
-        extraDepth = Math.Max(-d,0);
-        line = new List<Move>();
+    public Valuation(float evaluation, int depth){
+        Evaluation = evaluation;
+        Depth = Math.Min(depth,0);
+        ExtraDepth = Math.Max(-depth,0);
+        Line = new List<Move>();
     }
 
-    public override String ToString(){
-        var output = eval.ToString("0.00") + " (" + depth.ToString() + "+" + extraDepth.ToString() + ") ";
-        for (int i = line.Count-1; i >= 0; i--){
-            output += " " + line[i].ToString() + ",";
-        }
-        return output;
-    }
-
-    private List<Move> line;
-    public float eval {get; set;}
-    public int depth {get; set; }
-    public int extraDepth {get; set; }
+    public List<Move> Line;
+    public float Evaluation {get; set;}
+    public int Depth {get; set; }
+    public int ExtraDepth {get; set; }
     // private Board board { get; init; }
 
-    public Move bestMove() {
-        if (line.Any()) return line.Last();
+    public Move BestMove() {
+        if (Line.Any()) return Line.Last();
         else return Move.NullMove;
     }
 
-    public Valuation extend(Move move, int currentDepth) {
-        var extendedEval = new Valuation(-eval, currentDepth);
-        extendedEval.extraDepth = extraDepth;
-        extendedEval.line = line.ToList(); //copy line
-        extendedEval.line.Add(move); //add new move
-        extendedEval.depth = currentDepth;
+    public Valuation Extend(Move move, int currentDepth) {
+        var extendedEval = new Valuation(-Evaluation, currentDepth)
+        {
+            ExtraDepth = ExtraDepth,
+            Line = new(Line) // copy line
+        };
+        extendedEval.Line.Add(move); //add new move
+        extendedEval.Depth = currentDepth;
         return extendedEval;
     }
 }
