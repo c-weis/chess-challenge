@@ -51,7 +51,7 @@ public class MyBot : IChessBot
     public Move Think(Board board, Timer timer)
     {
         // adapt depth based on time remaining
-        // DepthDecider(board, timer);
+        DepthDecider(board, timer);
 
         // Reset counter of board evaluations
         BoardEvaluationCounter = 0;
@@ -65,7 +65,7 @@ public class MyBot : IChessBot
                                     );
         
         // Console.WriteLine(timer.MillisecondsElapsedThisTurn);
-        RunningAverage_BoardEvaluations = (9*RunningAverage_BoardEvaluations + BoardCounter)/10;
+        RunningAverage_BoardEvaluations = (9*RunningAverage_BoardEvaluations + BoardEvaluationCounter)/10;
 
         // Print valuation and number of boards evaluated
         Console.WriteLine(LastValuation.ToString() + " (" +  BoardEvaluationCounter.ToString("0.0e+0") + ", "
@@ -89,7 +89,7 @@ public class MyBot : IChessBot
     }
 
     // EvaluateRecursively searches for the best move on board up to depth, discarding any moves that are below minEval or above maxEval
-    public static Valuation EvaluateRecursively(Board board, int depth, 
+    public Valuation EvaluateRecursively(Board board, int depth, 
                                             float lowerCutoff, float upperCutoff){
         // Deal with trivial cases first: checkmate, draw
         if (board.IsInCheckmate()) return new Valuation(-CheckMateValue*(10+depth), 100);
@@ -132,7 +132,7 @@ public class MyBot : IChessBot
         return bestValuation;
     }
 
-    public static Valuation EvaluateCheckTable(Board board, int depth, 
+    public Valuation EvaluateCheckTable(Board board, int depth, 
                                             float lowerCutoff, float upperCutoff){
 
         // First, see if we evaluated this position already at sufficient depth
