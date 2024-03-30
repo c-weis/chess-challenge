@@ -12,11 +12,13 @@ using System.Xml;
 public class MyBot : IChessBot
 {
     static int ExplorationDepth = 3;
-    static int ExtraCaptureDepth = 2;
+    static int ExtraCaptureDepth = 0;
+    static float CheckMateValue = 1e6f; // Large, but finite value for checkmate.
     static float[,,] WhitePieceValues;
     static Dictionary<ulong, Valuation> PreviousEvaluations; // sends (board Zobrist key) => (depth, evaluation containing eval, depth, line of best moves)
     
     static int BoardCounter = 0;
+    static int RunningAverage_BoardEvaluations = 0;
 
     static MyBot(){
         // create lookup tables for piece values
@@ -52,12 +54,8 @@ public class MyBot : IChessBot
 
     public Move Think(Board board, Timer timer)
     {
-        // FIND BEST MOVE
-        // Fetch allowed moves and sort them
-        var sortedMoves = board.GetLegalMoves().OrderByDescending(move => MoveEvaluationOrder(board, move));
-
         // adapt depth based on time remaining
-        DepthDecider(board, timer);
+        // DepthDecider(board, timer);
 
         BoardCounter = 0;
 
@@ -70,8 +68,11 @@ public class MyBot : IChessBot
                                     );
         
         // Console.WriteLine(timer.MillisecondsElapsedThisTurn);
+        RunningAverage_BoardEvaluations = (9*RunningAverage_BoardEvaluations + BoardCounter)/10;
+
         // Print valuation and number of boards evaluated
-        Console.WriteLine(valuation.ToString() + " (" + BoardCounter.ToString("0e+0") + ")");
+        Console.WriteLine(valuation.ToString() + " (" +  BoardCounter.ToString("0.0e+0") + ", "
+                                     + RunningAverage_BoardEvaluations.ToString("0.0e+0") + ")");
 
         return valuation.bestMove();
     }
@@ -84,17 +85,17 @@ public class MyBot : IChessBot
         order += board.IsInCheck() ? 500 : 0;
         order += move.IsCapture ? 250 : 0;
 
-        // order += (int)( 50 * EvaluateBoard(board));
+        // order += (int)( 100 * EvaluateBoard(board));
 
         board.UndoMove(move);
         return order;
     }
 
     // EvaluateRecursively searches for the best move on board up to depth, discarding any moves that are below minEval or above maxEval
-    public Valuation EvaluateRecursively(Board board, int depth, 
+    public static Valuation EvaluateRecursively(Board board, int depth, 
                                             float lowerCutoff, float upperCutoff){
         // Deal with trivial cases first: checkmate, draw
-        if (board.IsInCheckmate()) return new Valuation(float.NegativeInfinity, 100);
+        if (board.IsInCheckmate()) return new Valuation(-CheckMateValue*(10+depth), 100);
         if (board.IsDraw()) return new Valuation(0, 100);
 
         // Check if we need to stop the search for depth reasons
@@ -134,12 +135,12 @@ public class MyBot : IChessBot
         return bestValuation;
     }
 
-    public Valuation EvaluateCheckTable(Board board, int depth, 
+    public static Valuation EvaluateCheckTable(Board board, int depth, 
                                             float lowerCutoff, float upperCutoff){
 
         // First, see if we evaluated this position already at sufficient depth
         // XOR with plycount to account for repetitions
-        var zobristKey = board.ZobristKey ^ (ulong)(board.PlyCount);
+        var zobristKey = board.ZobristKey ^ ((ulong)(board.PlyCount) << 1);
         // Every evaluation is stored from white's perspective
 
         Boolean keyExisted = false;
@@ -178,7 +179,7 @@ public class MyBot : IChessBot
             (board.IsWhiteToMove ? 1.0f : -1.0f) * evaluationForWhite
             - (board.IsInCheck() ? 1e-5f : 0.0f); // bias against being in check
 
-        // We have evaluated another board
+        // We have evaluated another board, increase counter
         BoardCounter ++;
         return totalEvaluation;
     }
