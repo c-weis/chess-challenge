@@ -15,6 +15,9 @@ public class MyBot : IChessBot
     static int ExtraCaptureDepth = 2;
     static float[,,] WhitePieceValues;
     static Dictionary<ulong, Valuation> PreviousEvaluations; // sends (board Zobrist key) => (depth, evaluation containing eval, depth, line of best moves)
+    
+    static int BoardCounter = 0;
+
     static MyBot(){
         // create lookup tables for piece values
         WhitePieceValues = new float[5,8,8];
@@ -56,6 +59,8 @@ public class MyBot : IChessBot
         // adapt depth based on time remaining
         DepthDecider(board, timer);
 
+        BoardCounter = 0;
+
         // On the top level we still check the table, mainly to save the top level computations.
         Valuation valuation = EvaluateCheckTable(
                                     board, 
@@ -65,7 +70,8 @@ public class MyBot : IChessBot
                                     );
         
         // Console.WriteLine(timer.MillisecondsElapsedThisTurn);
-        Console.WriteLine(valuation.ToString());
+        // Print valuation and number of boards evaluated
+        Console.WriteLine(valuation.ToString() + " (" + BoardCounter.ToString("0e+0") + ")");
 
         return valuation.bestMove();
     }
@@ -88,13 +94,13 @@ public class MyBot : IChessBot
     public Valuation EvaluateRecursively(Board board, int depth, 
                                             float lowerCutoff, float upperCutoff){
         // Deal with trivial cases first: checkmate, draw
-        if (board.IsInCheckmate()) return new Valuation(float.NegativeInfinity, 0);
-        if (board.IsDraw()) return new Valuation(0, 0);
+        if (board.IsInCheckmate()) return new Valuation(float.NegativeInfinity, 100);
+        if (board.IsDraw()) return new Valuation(0, 100);
 
         // Check if we need to stop the search for depth reasons
-        if (depth == -ExtraCaptureDepth)  return new Valuation(EvaluateBoard(board), -depth); 
+        if (depth == -ExtraCaptureDepth)  return new Valuation(EvaluateBoard(board), depth); 
         var moves = board.GetLegalMoves(depth<=0); // if depth is <= 0, get captures only
-        if (!moves.Any()) return new Valuation(EvaluateBoard(board), -depth);
+        if (!moves.Any()) return new Valuation(EvaluateBoard(board), depth);
 
         // Sort moves (if remaining depth >= 2)
         var sortedMoves = (depth >= 2) ? moves.OrderByDescending(move => MoveEvaluationOrder(board, move)) 
@@ -172,6 +178,8 @@ public class MyBot : IChessBot
             (board.IsWhiteToMove ? 1.0f : -1.0f) * evaluationForWhite
             - (board.IsInCheck() ? 1e-5f : 0.0f); // bias against being in check
 
+        // We have evaluated another board
+        BoardCounter ++;
         return totalEvaluation;
     }
 
@@ -201,10 +209,10 @@ public class MyBot : IChessBot
 
 public struct Valuation {
 
-    public Valuation(float e, int extra){ // should also pass depth?
+    public Valuation(float e, int d){ // should also pass depth?
         eval = e;
-        depth = 0;
-        extraDepth = extra;
+        depth = Math.Min(d,0);
+        extraDepth = Math.Max(-d,0);
         line = new List<Move>();
     }
 
@@ -228,7 +236,8 @@ public struct Valuation {
     }
 
     public Valuation extend(Move move, int currentDepth) {
-        var extendedEval = new Valuation(-eval, extraDepth);
+        var extendedEval = new Valuation(-eval, currentDepth);
+        extendedEval.extraDepth = extraDepth;
         extendedEval.line = line.ToList(); //copy line
         extendedEval.line.Add(move); //add new move
         extendedEval.depth = currentDepth;
