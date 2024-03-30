@@ -10,12 +10,10 @@ public class MyBot : IChessBot
     static int ExtraCaptureDepth = 0;
     static float CheckMateValue = 1e6f; // Large, but finite value for checkmate.
     static float[,,] WhitePieceValues;
-    private Dictionary<ulong, Valuation> PreviousEvaluations {get; set;} = new(); // sends (board Zobrist key) => (depth, evaluation containing eval, depth, line of best moves)
-
-    public Valuation LastValuation {get; set;}
-    
-    static int BoardEvaluationCounter = 0;
-    static int RunningAverage_BoardEvaluations = 0;
+    private Dictionary<ulong, Computation> PreviousEvaluations {get; set;} = new(); // sends (board Zobrist key) => Computation
+    public Computation LastComputation {get; set;}
+    public int BoardEvaluationCounter {get; private set;} = 0;
+    public int RunningAverageBoardEvaluations {get; private set;} = 0;
 
     static MyBot(){
         // create lookup tables for piece values
@@ -57,21 +55,16 @@ public class MyBot : IChessBot
         BoardEvaluationCounter = 0;
 
         // On the top level we still check the table, mainly to save the top level computations.
-        LastValuation = EvaluateCheckTable(
+        LastComputation = EvaluateCheckTable(
                                     board, 
                                     ExplorationDepth,
                                     float.NegativeInfinity,
                                     float.PositiveInfinity
                                     );
         
-        // Console.WriteLine(timer.MillisecondsElapsedThisTurn);
-        RunningAverage_BoardEvaluations = (9*RunningAverage_BoardEvaluations + BoardEvaluationCounter)/10;
+        RunningAverageBoardEvaluations = (9*RunningAverageBoardEvaluations + BoardEvaluationCounter)/10;
 
-        // Print valuation and number of boards evaluated
-        Console.WriteLine(LastValuation.ToString() + " (" +  BoardEvaluationCounter.ToString("0.0e+0") + ", "
-                                     + RunningAverage_BoardEvaluations.ToString("0.0e+0") + ")");
-
-        return LastValuation.BestMove();
+        return LastComputation.BestMove;
     }
 
     private static int MoveEvaluationOrder(Board board, Move move){
@@ -89,23 +82,24 @@ public class MyBot : IChessBot
     }
 
     // EvaluateRecursively searches for the best move on board up to depth, discarding any moves that are below minEval or above maxEval
-    public Valuation EvaluateRecursively(Board board, int depth, 
+    public Computation EvaluateRecursively(Board board, int depth, 
                                             float lowerCutoff, float upperCutoff){
         // Deal with trivial cases first: checkmate, draw
-        if (board.IsInCheckmate()) return new Valuation(-CheckMateValue*(10+depth), 100);
-        if (board.IsDraw()) return new Valuation(0, 100);
+        if (board.IsInCheckmate()) return new Computation(-CheckMateValue*(10+depth), 100);
+        if (board.IsDraw()) return new Computation(0, 100);
 
         // Check if we need to stop the search for depth reasons
-        if (depth == -ExtraCaptureDepth)  return new Valuation(EvaluateBoard(board), depth); 
+        if (depth == -ExtraCaptureDepth)  return new Computation(EvaluateBoard(board), depth); 
         var moves = board.GetLegalMoves(depth<=0); // if depth is <= 0, get captures only
-        if (!moves.Any()) return new Valuation(EvaluateBoard(board), depth);
+        if (!moves.Any()) return new Computation(EvaluateBoard(board), depth);
 
         // Sort moves (if remaining depth >= 2)
         var sortedMoves = (depth >= 2) ? moves.OrderByDescending(move => MoveEvaluationOrder(board, move)) 
                                         : moves.AsEnumerable();
 
         float bestEval = float.NegativeInfinity;
-        Valuation bestValuation = default; // new Valuation(0, 0);
+        Computation bestValuation = new(0,0);
+
         // Loop through moves, recursively calling this function and employing alpha-beta pruning
         foreach(var move in sortedMoves){
             board.MakeMove(move);
@@ -132,7 +126,7 @@ public class MyBot : IChessBot
         return bestValuation;
     }
 
-    public Valuation EvaluateCheckTable(Board board, int depth, 
+    public Computation EvaluateCheckTable(Board board, int depth, 
                                             float lowerCutoff, float upperCutoff){
 
         // First, see if we evaluated this position already at sufficient depth
@@ -159,7 +153,7 @@ public class MyBot : IChessBot
         return valuation;
     }
 
-    private static float EvaluateBoard(Board board) {
+    private float EvaluateBoard(Board board) {
         var evaluationForWhite = 0.0f;
         var pieceLists = board.GetAllPieceLists();
 
@@ -177,7 +171,7 @@ public class MyBot : IChessBot
             - (board.IsInCheck() ? 1e-5f : 0.0f); // bias against being in check
 
         // We have evaluated another board, increase counter
-        BoardEvaluationCounter ++;
+        BoardEvaluationCounter++;
         return totalEvaluation;
     }
 
@@ -205,9 +199,9 @@ public class MyBot : IChessBot
 }
 
 
-public struct Valuation {
+public struct Computation {
 
-    public Valuation(float evaluation, int depth){
+    public Computation(float evaluation, int depth){
         Evaluation = evaluation;
         Depth = Math.Min(depth,0);
         ExtraDepth = Math.Max(-depth,0);
@@ -218,15 +212,11 @@ public struct Valuation {
     public float Evaluation {get; set;}
     public int Depth {get; set; }
     public int ExtraDepth {get; set; }
-    // private Board board { get; init; }
 
-    public Move BestMove() {
-        if (Line.Any()) return Line.Last();
-        else return Move.NullMove;
-    }
+    public readonly Move BestMove => Line.LastOrDefault(Move.NullMove);
 
-    public Valuation Extend(Move move, int currentDepth) {
-        var extendedEval = new Valuation(-Evaluation, currentDepth)
+    public Computation Extend(Move move, int currentDepth) {
+        var extendedEval = new Computation(-Evaluation, currentDepth)
         {
             ExtraDepth = ExtraDepth,
             Line = new(Line) // copy line

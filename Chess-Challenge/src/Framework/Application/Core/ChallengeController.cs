@@ -157,7 +157,7 @@ namespace ChessChallenge.Application
                 if(PlayerToMove.PlayerType == PlayerType.MyBot) {
                     // cast IBot to MyBot
                     MyBot outputBot = (MyBot)PlayerToMove.Bot; 
-                    OutputValuation(outputBot.LastValuation, board);
+                    OutputValuation(outputBot, board);
                 }
                 return new Move(move.RawValue);
             }
@@ -170,8 +170,9 @@ namespace ChessChallenge.Application
             return Move.NullMove;
         }
 
-        private void OutputValuation(Valuation valuation, Board board)
+        private void OutputValuation(MyBot bot, Board board)
         {
+            var valuation = bot.LastComputation;
             StringBuilder stringBuilder = new(
                 $"{valuation.Evaluation:0.00} ({valuation.Depth}+{valuation.ExtraDepth}) "
             );
@@ -200,6 +201,10 @@ namespace ChessChallenge.Application
             foreach (var (_, move) in Enumerable.Reverse(enumeratedValuationMoves)){
                 board.UndoMove(move, inSearch: true);
             }
+
+            stringBuilder.Append(
+                $"| {bot.BoardEvaluationCounter:0.00}, {bot.RunningAverageBoardEvaluations:0.00}"
+            );
 
             // output line
             Debug.WriteLine(stringBuilder.ToString());
