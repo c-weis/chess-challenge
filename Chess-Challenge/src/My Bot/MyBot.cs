@@ -2,12 +2,15 @@
 using ChessChallenge.Debugging;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.Linq;
 
 public class MyBot : IChessBot
 {
-    static int ExplorationDepth = 3;
-    static int ExtraCaptureDepth = 5;
+    static int MaxExplorationDepth = 4;
+    static int MaxExtraCaptureDepth = 5;
+    private int ExplorationDepth = MaxExplorationDepth;
+    private int ExtraCaptureDepth = MaxExtraCaptureDepth;
     static float CheckMateValue = 1e6f; // Large, but finite value for checkmate.
     static float[,,] WhitePieceValues;
     private Dictionary<ulong, Computation> PreviousEvaluations {get; set;} = new(); // sends (board Zobrist key) => Computation
@@ -107,19 +110,18 @@ public class MyBot : IChessBot
         var sortedMoves = (depth >= 0) ? moves.OrderByDescending(move => MoveEvaluationOrder(board, move)) 
                                         : moves.AsEnumerable();
 
-        float bestEval = float.NegativeInfinity;
-        Computation bestComputation = new(float.NegativeInfinity,0);
+        float bestEval = (depth>0) ? float.NegativeInfinity : EvaluateBoard(board);
+        Computation bestComputation = new(bestEval, depth); // This should never be used if depth > 0
 
         // Loop through moves, recursively calling this function and employing alpha-beta pruning
         foreach(var move in sortedMoves){
             board.MakeMove(move);
-            var computation = (useComputationTable ? 
+            var computation = useComputationTable ? 
                                 EvaluateCheckTable(
                                     board, 
                                     depth-1,
                                     -upperCutoff,
-                                    -lowerCutoff,
-                                    outputComputationSummaries:false
+                                    -lowerCutoff
                                     )
                                 :
                                 EvaluateRecursively(
@@ -127,9 +129,8 @@ public class MyBot : IChessBot
                                     depth-1,
                                     -upperCutoff,
                                     -lowerCutoff,
-                                    outputComputationSummaries,
                                     useComputationTable : false
-                                    ));
+                                    );
             computation = computation.Extend(move, depth);
             board.UndoMove(move);
 
@@ -170,7 +171,14 @@ public class MyBot : IChessBot
             // else carry on - the position needs to be reevaluated
         } 
 
-        var computation = EvaluateRecursively(board, depth, lowerCutoff, upperCutoff, outputComputationSummaries);
+        var computation = EvaluateRecursively(
+                                                board, 
+                                                depth, 
+                                                lowerCutoff, 
+                                                upperCutoff, 
+                                                outputComputationSummaries, 
+                                                useComputationTable: true
+                                            );
 
         if (lowerCutoff <= computation.Evaluation && computation.Evaluation <= upperCutoff) {
             // This evaluation was not cut off and can be trusted, so we save it
@@ -205,9 +213,9 @@ public class MyBot : IChessBot
     private void DepthDecider(Board board, Timer timer){
         if(timer.MillisecondsRemaining > 10_000) {
             if(board.PlyCount < 10){
-                ExplorationDepth = 3;
+                ExplorationDepth = 2;
             } else {
-                ExplorationDepth = 4;
+                ExplorationDepth = 3;
             }
         }else{
             ExplorationDepth = 3;
@@ -218,7 +226,8 @@ public class MyBot : IChessBot
                 ExplorationDepth = 2;
             }
         }
-        return;
+        ExplorationDepth = Math.Min(ExplorationDepth, MaxExplorationDepth);
+        ExtraCaptureDepth = Math.Min(ExtraCaptureDepth, MaxExtraCaptureDepth);
     }
 }
 
