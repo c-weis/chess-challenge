@@ -7,7 +7,7 @@ using System.Linq;
 public class MyBot : IChessBot
 {
     static int ExplorationDepth = 3;
-    static int ExtraCaptureDepth = 15;
+    static int ExtraCaptureDepth = 5;
     static float CheckMateValue = 1e6f; // Large, but finite value for checkmate.
     static float[,,] WhitePieceValues;
     private Dictionary<ulong, Computation> PreviousEvaluations {get; set;} = new(); // sends (board Zobrist key) => Computation
@@ -60,8 +60,17 @@ public class MyBot : IChessBot
                                     ExplorationDepth,
                                     float.NegativeInfinity,
                                     float.PositiveInfinity,
-                                    outputComputationSummaries: true
+                                    outputComputationSummaries: false
                                     );
+
+        // LastComputation = EvaluateRecursively(
+        //                             board, 
+        //                             ExplorationDepth,
+        //                             float.NegativeInfinity,
+        //                             float.PositiveInfinity,
+        //                             outputComputationSummaries: false,
+        //                             useComputationTable: false
+        //                             );
 
         RunningAverageBoardEvaluations = (9*RunningAverageBoardEvaluations + BoardEvaluationCounter)/10;
 
@@ -83,7 +92,8 @@ public class MyBot : IChessBot
     // EvaluateRecursively searches for the best move on board up to depth, discarding any moves that are below minEval or above maxEval
     public Computation EvaluateRecursively(Board board, int depth, 
                                             float lowerCutoff, float upperCutoff,
-                                            bool outputComputationSummaries=false){
+                                            bool outputComputationSummaries=false,
+                                            bool useComputationTable=false){
         // Deal with trivial cases first: checkmate, draw
         if (board.IsInCheckmate()) return new Computation(-CheckMateValue*(10+depth), 100);
         if (board.IsDraw()) return new Computation(0, 100);
@@ -103,13 +113,23 @@ public class MyBot : IChessBot
         // Loop through moves, recursively calling this function and employing alpha-beta pruning
         foreach(var move in sortedMoves){
             board.MakeMove(move);
-            var computation = EvaluateCheckTable(
+            var computation = (useComputationTable ? 
+                                EvaluateCheckTable(
                                     board, 
                                     depth-1,
                                     -upperCutoff,
                                     -lowerCutoff,
                                     outputComputationSummaries
-                                    );
+                                    )
+                                :
+                                EvaluateRecursively(
+                                    board, 
+                                    depth-1,
+                                    -upperCutoff,
+                                    -lowerCutoff,
+                                    outputComputationSummaries,
+                                    useComputationTable : false
+                                    ));
             computation = computation.Extend(move, depth);
             board.UndoMove(move);
 
