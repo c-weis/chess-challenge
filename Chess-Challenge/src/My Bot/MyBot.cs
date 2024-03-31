@@ -119,7 +119,7 @@ public class MyBot : IChessBot
                                     depth-1,
                                     -upperCutoff,
                                     -lowerCutoff,
-                                    outputComputationSummaries
+                                    outputComputationSummaries:false
                                     )
                                 :
                                 EvaluateRecursively(
