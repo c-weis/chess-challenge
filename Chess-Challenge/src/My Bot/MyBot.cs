@@ -108,7 +108,7 @@ public class MyBot : IChessBot
                                     depth-1,
                                     -upperCutoff,
                                     -lowerCutoff,
-                                    outputComputationSummaries
+                                    outputComputationSummaries: false
                                     );
             computation = computation.Extend(move, depth);
             board.UndoMove(move);
