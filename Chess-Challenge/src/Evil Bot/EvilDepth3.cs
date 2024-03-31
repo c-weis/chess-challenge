@@ -42,6 +42,9 @@ public class EvilDepth3 : IChessBot
             sum += multiplier * pieceList.Count * values[(int)pieceList.TypeOfPieceInList];
         }
         
+        // Add pseudo-randomness
+        sum += 01e-10f * ((int) board.ZobristKey % 1000);
+        
         return Multiplier(board) * sum;
     }
     private float Multiplier(Board board){
