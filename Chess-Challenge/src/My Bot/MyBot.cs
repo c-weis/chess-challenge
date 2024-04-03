@@ -105,8 +105,7 @@ public class MyBot : IChessBot
 
         // Check if we need to stop the search for depth reasons
         if (depth == -ExtraCaptureDepth)  return new Computation(EvaluateBoard(board), depth);
-        var moves = depth > 0 ? board.GetLegalMoves() : board.GetLegalMoves().Where(move => move.IsCapture || move.IsCheck(board)); // if depth is <= 0, get captures and checks only
-        //var moves = board.GetLegalMoves(depth <= 0); // if depth is <= 0, get captures only
+        var moves = board.GetLegalMoves();
 
         // Sort moves (if remaining depth >= 0)
         var sortedMoves = (depth > 0) ? moves.OrderByDescending(move => MoveEvaluationOrder(board, move)) 
@@ -118,6 +117,14 @@ public class MyBot : IChessBot
         // Loop through moves, recursively calling this function and employing alpha-beta pruning
         foreach(var move in sortedMoves){
             board.MakeMove(move);
+
+            // at depth <= 0, only look for captures and checks! (we're not sorting at this depth so can do this here)
+            if(depth <= 0 && !move.IsCapture && !board.IsInCheck())
+            {
+                board.UndoMove(move);
+                continue;
+            }
+
             var computation = useComputationTable ? 
                                 EvaluateCheckTable(
                                     board, 
@@ -264,13 +271,3 @@ public struct Computation {
     }
 }
 
-static class BoardExtender
-{
-    public static bool IsCheck(this Move move, Board board)
-    {
-        board.MakeMove(move);
-        bool isCheck = board.IsInCheck();
-        board.UndoMove(move);
-        return isCheck;
-    }
-}
