@@ -2,12 +2,11 @@
 using ChessChallenge.Debugging;
 using System;
 using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
 using System.Linq;
 
 public class MyBot : IChessBot
 {
-    static int MaxExplorationDepth = 4;
+    static int MaxExplorationDepth = 4; 
     static int MaxExtraCaptureDepth = 5;
     private int ExplorationDepth = MaxExplorationDepth;
     private int ExtraCaptureDepth = MaxExtraCaptureDepth;
@@ -51,6 +50,9 @@ public class MyBot : IChessBot
 
     public Move Think(Board board, Timer timer)
     {
+        // Clear lookup table
+        PreviousEvaluations.Clear();
+
         // adapt depth based on time remaining
         DepthDecider(board, timer);
 
@@ -98,17 +100,17 @@ public class MyBot : IChessBot
                                             bool outputComputationSummaries=false,
                                             bool useComputationTable=false){
         // Deal with trivial cases first: checkmate, draw
-        if (board.IsInCheckmate()) return new Computation(-CheckMateValue*(10+depth), 100);
+        if (board.IsInCheckmate()) return new Computation(-CheckMateValue*(1000-board.PlyCount), 100);
         if (board.IsDraw()) return new Computation(0, 100);
 
         // Check if we need to stop the search for depth reasons
-        if (depth == -ExtraCaptureDepth)  return new Computation(EvaluateBoard(board), depth); 
-        var moves = board.GetLegalMoves(depth<=0); // if depth is <= 0, get captures only
-        if (!moves.Any()) return new Computation(EvaluateBoard(board), depth);
+        if (depth == -ExtraCaptureDepth)  return new Computation(EvaluateBoard(board), depth);
+        var moves = depth > 0 ? board.GetLegalMoves() : board.GetLegalMoves().Where(move => move.IsCapture || move.IsCheck(board)); // if depth is <= 0, get captures and checks only
+        //var moves = board.GetLegalMoves(depth <= 0); // if depth is <= 0, get captures only
 
         // Sort moves (if remaining depth >= 0)
-        var sortedMoves = (depth >= 0) ? moves.OrderByDescending(move => MoveEvaluationOrder(board, move)) 
-                                        : moves.AsEnumerable();
+        var sortedMoves = (depth > 0) ? moves.OrderByDescending(move => MoveEvaluationOrder(board, move)) 
+                                      : moves.AsEnumerable();
 
         float bestEval = (depth>0) ? float.NegativeInfinity : EvaluateBoard(board);
         Computation bestComputation = new(bestEval, depth); // This should never be used if depth > 0
@@ -211,23 +213,26 @@ public class MyBot : IChessBot
     }
 
     private void DepthDecider(Board board, Timer timer){
+        ExplorationDepth = MaxExplorationDepth;
+        ExtraCaptureDepth = MaxExtraCaptureDepth;
         if(timer.MillisecondsRemaining > 10_000) {
             if(board.PlyCount < 10){
-                ExplorationDepth = 2;
+                ExplorationDepth = MaxExplorationDepth-1;
             } else {
-                ExplorationDepth = 3;
+                ExplorationDepth = MaxExplorationDepth;
             }
         }else{
-            ExplorationDepth = 3;
+            ExplorationDepth = MaxExplorationDepth-1;
             if(timer.MillisecondsRemaining < 1_000) {
-                ExtraCaptureDepth = 5;
+                ExtraCaptureDepth = MaxExtraCaptureDepth-2;
             }
             else if (timer.MillisecondsRemaining < 100) {
-                ExplorationDepth = 2;
+                ExplorationDepth = MaxExplorationDepth-2;
             }
         }
+        // enforce maxima and that the sum of exploration depth and capture depth stays even
         ExplorationDepth = Math.Min(ExplorationDepth, MaxExplorationDepth);
-        ExtraCaptureDepth = Math.Min(ExtraCaptureDepth, MaxExtraCaptureDepth);
+        ExtraCaptureDepth = Math.Min(ExtraCaptureDepth, MaxExtraCaptureDepth) - ((ExplorationDepth + ExtraCaptureDepth) % 2);
     }
 }
 
@@ -256,5 +261,16 @@ public struct Computation {
         extendedEval.Line.Add(move); //add new move
         extendedEval.Depth = currentDepth;
         return extendedEval;
+    }
+}
+
+static class BoardExtender
+{
+    public static bool IsCheck(this Move move, Board board)
+    {
+        board.MakeMove(move);
+        bool isCheck = board.IsInCheck();
+        board.UndoMove(move);
+        return isCheck;
     }
 }
