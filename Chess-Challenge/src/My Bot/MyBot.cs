@@ -1,4 +1,5 @@
-﻿using ChessChallenge.API;
+﻿#define USE_COMPUTATION_TABLE
+using ChessChallenge.API;
 using ChessChallenge.Debugging;
 using System;
 using System.Collections.Generic;
@@ -16,6 +17,7 @@ public class MyBot : IChessBot
     public Computation LastComputation {get; set;}
     public int BoardEvaluationCounter {get; private set;} = 0;
     public int RunningAverageBoardEvaluations {get; private set;} = -1;
+    static int ActivatedBits(ulong bitboard) => BitboardHelper.GetNumberOfSetBits(bitboard);
 
     static MyBot(){
         // create lookup tables for piece values
@@ -39,12 +41,24 @@ public class MyBot : IChessBot
 
         // add centre bonus
         // pawns and knights
-            foreach (var rank in Enumerable.Range(3,5)){
-                foreach (var file in Enumerable.Range(3,4)){
-                    WhitePieceValues[0,rank,file] += 0.01f;
-                    WhitePieceValues[1,rank,file] += 0.02f;
-                }
+        foreach (var rank in Enumerable.Range(2, 4))
+        {
+            foreach (var file in Enumerable.Range(2, 4))
+            {
+                /* Value central 4 + 8 squares:
+                 *  V = given centre bonus 
+                 *  x = V/2
+                 *
+                 *      x x
+                 *    x V V v
+                 *    x V V x
+                 *      x x
+                 */
+                float value = 0.01f * (3.0f - (Math.Abs(rank - 3.5f) + Math.Abs(rank - 3.5f)))/3.0f;
+                WhitePieceValues[0, rank, file] += value; // pawns
+                WhitePieceValues[1, rank, file] += 0.02f;
             }
+        }
 
     }
 
@@ -60,7 +74,7 @@ public class MyBot : IChessBot
         BoardEvaluationCounter = 0;
 
         // On the top level we still check the table, mainly to save the top level computations.
-        LastComputation = EvaluateCheckTable(
+        LastComputation = EvaluateRecursively(
                                     board, 
                                     ExplorationDepth,
                                     float.NegativeInfinity,
@@ -68,14 +82,24 @@ public class MyBot : IChessBot
                                     outputComputationSummaries: false
                                     );
 
-        // LastComputation = EvaluateRecursively(
-        //                             board, 
-        //                             ExplorationDepth,
-        //                             float.NegativeInfinity,
-        //                             float.PositiveInfinity,
-        //                             outputComputationSummaries: false,
-        //                             useComputationTable: false
-        //                             );
+        // extend search in end game - sloppy implementation for now
+        int totalNumberOfPieces = ActivatedBits(board.AllPiecesBitboard);
+        while (
+            totalNumberOfPieces < 10
+            && timer.MillisecondsRemaining > 50 * timer.MillisecondsElapsedThisTurn
+            && LastComputation.Evaluation < CheckMateValue
+            )
+        {
+            ExplorationDepth += 1;
+            ExtraCaptureDepth += 1;
+            LastComputation = EvaluateRecursively(
+                                        board, 
+                                        ExplorationDepth,
+                                        float.NegativeInfinity,
+                                        float.PositiveInfinity,
+                                        outputComputationSummaries: false
+                                        );
+        }
 
         RunningAverageBoardEvaluations = (9*RunningAverageBoardEvaluations + BoardEvaluationCounter)/10;
 
@@ -95,106 +119,94 @@ public class MyBot : IChessBot
     }
 
     // EvaluateRecursively searches for the best move on board up to depth, discarding any moves that are below minEval or above maxEval
-    public Computation EvaluateRecursively(Board board, int depth, 
+    public Computation EvaluateRecursively(Board board, int depth,
                                             float lowerCutoff, float upperCutoff,
-                                            bool outputComputationSummaries=false,
-                                            bool useComputationTable=false){
-        // Deal with trivial cases first: checkmate, draw
-        if (board.IsInCheckmate()) return new Computation(-CheckMateValue*(1000-board.PlyCount), 100);
-        if (board.IsDraw()) return new Computation(0, 100);
-
-        // Check if we need to stop the search for depth reasons
-        if (depth == -ExtraCaptureDepth)  return new Computation(EvaluateBoard(board), depth);
-        var moves = board.GetLegalMoves();
-
-        // Sort moves (if remaining depth >= 0)
-        var sortedMoves = (depth > 0) ? moves.OrderByDescending(move => MoveEvaluationOrder(board, move)) 
-                                      : moves.AsEnumerable();
-
-        float bestEval = (depth>0) ? float.NegativeInfinity : EvaluateBoard(board);
-        Computation bestComputation = new(bestEval, depth); // This should never be used if depth > 0
-
-        // Loop through moves, recursively calling this function and employing alpha-beta pruning
-        foreach(var move in sortedMoves){
-            board.MakeMove(move);
-
-            // at depth <= 0, only look for captures and checks! (we're not sorting at this depth so can do this here)
-            if(depth <= 0 && !move.IsCapture && !board.IsInCheck())
-            {
-                board.UndoMove(move);
-                continue;
-            }
-
-            var computation = useComputationTable ? 
-                                EvaluateCheckTable(
-                                    board, 
-                                    depth-1,
-                                    -upperCutoff,
-                                    -lowerCutoff
-                                    )
-                                :
-                                EvaluateRecursively(
-                                    board, 
-                                    depth-1,
-                                    -upperCutoff,
-                                    -lowerCutoff,
-                                    useComputationTable : false
-                                    );
-            computation = computation.Extend(move, depth);
-            board.UndoMove(move);
-
-            if(outputComputationSummaries) {
-                Debugger.OutputSummary(computation, board);
-            }
-
-            if(computation.Evaluation >= bestEval) {
-                lowerCutoff = Math.Max(lowerCutoff, computation.Evaluation);
-                bestEval = computation.Evaluation;
-                bestComputation = computation;
-                if(lowerCutoff > upperCutoff) {
-                    // too good to be true. this should not be saved in the PreviousEvaluations
-                    break;
-                }
-            }
-        }
-
-        return bestComputation;
-    }
-
-    public Computation EvaluateCheckTable(Board board, int depth, 
-                                            float lowerCutoff, float upperCutoff,
-                                            bool outputComputationSummaries=false){
-
+                                            bool outputComputationSummaries = false)
+    {
+#if USE_COMPUTATION_TABLE
         // First, see if we evaluated this position already at sufficient depth
         // XOR with plycount to account for repetitions
         var zobristKey = board.ZobristKey ^ ((ulong)board.PlyCount << 1);
         // Every evaluation is stored from white's perspective
 
         bool keyExisted = false;
-        if(PreviousEvaluations.TryGetValue(zobristKey, out var previousEval)){
+        if (PreviousEvaluations.TryGetValue(zobristKey, out var previousEval))
+        {
             // we have seen this position before - check depth
-            if(previousEval.Depth >= depth){
+            if (previousEval.Depth >= depth)
+            {
                 return previousEval;
             }
             keyExisted = true;
             // else carry on - the position needs to be reevaluated
-        } 
+        }
+#endif
 
-        var computation = EvaluateRecursively(
-                                                board, 
-                                                depth, 
-                                                lowerCutoff, 
-                                                upperCutoff, 
-                                                outputComputationSummaries, 
-                                                useComputationTable: true
-                                            );
+        // Deal with trivial cases first: checkmate, draw
+        if (board.IsInCheckmate()) return new Computation(-CheckMateValue * (1000 - board.PlyCount), 100);
+        if (board.IsDraw()) return new Computation(0, 100);
 
-        if (lowerCutoff <= computation.Evaluation && computation.Evaluation <= upperCutoff) {
+        // Check if we need to stop the search for depth reasons
+        if (depth == -ExtraCaptureDepth) return new Computation(EvaluateBoard(board), depth);
+        var moves = board.GetLegalMoves();
+
+        // Sort moves (if remaining depth >= 0)
+        var sortedMoves = (depth > 0) ? moves.OrderByDescending(move => MoveEvaluationOrder(board, move))
+                                      : moves.AsEnumerable();
+
+        float bestEval = (depth > 0) ? float.NegativeInfinity : EvaluateBoard(board);
+        Computation bestComputation = new(bestEval, depth); // This should never be used if depth > 0
+
+        // Loop through moves, recursively calling this function and employing alpha-beta pruning
+        foreach (var move in sortedMoves)
+        {
+            board.MakeMove(move);
+
+            // at depth <= 0, only look for captures and checks! (we're not sorting at this depth so can do this here)
+            if (depth <= 0 && !move.IsCapture && !board.IsInCheck())
+            {
+                board.UndoMove(move);
+                continue;
+            }
+
+            var computation = EvaluateRecursively(
+                                    board,
+                                    depth - 1,
+                                    -upperCutoff,
+                                    -lowerCutoff
+                                    );
+
+            computation = computation.Extend(move, depth);
+            board.UndoMove(move);
+
+            if (outputComputationSummaries)
+            {
+                Debugger.OutputSummary(computation, board);
+            }
+
+            if (computation.Evaluation >= bestEval)
+            {
+                lowerCutoff = Math.Max(lowerCutoff, computation.Evaluation);
+                bestEval = computation.Evaluation;
+                bestComputation = computation;
+                if (lowerCutoff > upperCutoff)
+                {
+                    // too good to be true. this should not be saved in the PreviousEvaluations
+                    break;
+                }
+            }
+        }
+
+#if USE_COMPUTATION_TABLE
+        if (lowerCutoff <= bestComputation.Evaluation && bestComputation.Evaluation <= upperCutoff)
+        {
             // This evaluation was not cut off and can be trusted, so we save it
             if (!keyExisted) PreviousEvaluations.Add(zobristKey, default);
-            PreviousEvaluations[zobristKey] = computation;
+            PreviousEvaluations[zobristKey] = bestComputation;
         }
-        return computation;
+#endif
+
+        return bestComputation;
     }
 
     private float EvaluateBoard(Board board) {
@@ -210,6 +222,10 @@ public class MyBot : IChessBot
                 evaluationForWhite -= WhitePieceValues[i,piece.Square.File,7-piece.Square.Rank];
         }
 
+        // King safety
+        evaluationForWhite += KingSafetyValue(board, pieceLists[5][0].Square, true)
+                            - KingSafetyValue(board, pieceLists[11][0].Square, false);
+
         var totalEvaluation = 
             (board.IsWhiteToMove ? 1.0f : -1.0f) * evaluationForWhite
             - (board.IsInCheck() ? 1e-5f : 0.0f); // bias against being in check
@@ -219,30 +235,63 @@ public class MyBot : IChessBot
         return totalEvaluation;
     }
 
-    private void DepthDecider(Board board, Timer timer){
-        ExplorationDepth = MaxExplorationDepth;
-        ExtraCaptureDepth = MaxExtraCaptureDepth;
-        if(timer.MillisecondsRemaining > 10_000) {
-            if(board.PlyCount < 10){
-                ExplorationDepth = MaxExplorationDepth-1;
-            } else {
-                ExplorationDepth = MaxExplorationDepth;
-            }
-        }else{
-            ExplorationDepth = MaxExplorationDepth-1;
-            if(timer.MillisecondsRemaining < 1_000) {
-                ExtraCaptureDepth = MaxExtraCaptureDepth-2;
-            }
-            else if (timer.MillisecondsRemaining < 100) {
-                ExplorationDepth = MaxExplorationDepth-2;
+    private float KingSafetyValue(Board board, Square kingSquare, bool isWhite)
+    {
+        float sum = 0.0f;
+        ulong kingAdjacentSquares = BitboardHelper.GetKingAttacks(kingSquare);
+
+        // Subtract score for each square around the king under attack
+        while (kingAdjacentSquares != 0)
+        {
+            int index = BitboardHelper.ClearAndGetIndexOfLSB(ref kingAdjacentSquares);
+            if (board.SquareIsAttackedByOpponent(new Square(index)))
+            {
+                sum -= 0.05f;
             }
         }
-        // enforce maxima and that the sum of exploration depth and capture depth stays even
-        ExplorationDepth = Math.Min(ExplorationDepth, MaxExplorationDepth);
-        ExtraCaptureDepth = Math.Min(ExtraCaptureDepth, MaxExtraCaptureDepth) - ((ExplorationDepth + ExtraCaptureDepth) % 2);
+        return sum;
+    }
+
+    private void DepthDecider(Board board, Timer timer)
+    {
+        ExplorationDepth = MaxExplorationDepth;
+        ExtraCaptureDepth = MaxExtraCaptureDepth;
+        if (timer.MillisecondsRemaining > 10_000)
+        {
+            if (board.PlyCount < 10)
+            {
+                ExplorationDepth = MaxExplorationDepth - 1;
+            }
+            else
+            {
+                ExplorationDepth = MaxExplorationDepth;
+            }
+        }
+        else
+        {
+            ExplorationDepth = MaxExplorationDepth - 1;
+            if (timer.MillisecondsRemaining < 1_000)
+            {
+                ExtraCaptureDepth = MaxExtraCaptureDepth - 2;
+            }
+            else if (timer.MillisecondsRemaining < 100)
+            {
+                ExplorationDepth = MaxExplorationDepth - 2;
+            }
+        }
+        // Enforce maxima and make sure the depths are positive
+        ExplorationDepth = Math.Clamp(ExplorationDepth, 0, MaxExplorationDepth);
+        // Ensure the sum of exploration depth and capture depth stays even
+        if (ExtraCaptureDepth == 0)
+        {
+            ExtraCaptureDepth = ExplorationDepth % 2;
+        }
+        else
+        {
+            ExtraCaptureDepth = Math.Clamp(ExtraCaptureDepth, 0, MaxExtraCaptureDepth) - (ExplorationDepth + ExtraCaptureDepth) % 2;
+        }
     }
 }
-
 
 public struct Computation {
 
