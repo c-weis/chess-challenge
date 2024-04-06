@@ -5,7 +5,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-public class MyBot : IChessBot
+namespace ChessChallenge.EvilBots;
+public class SensiBot: IChessBot
 {
     static int MaxExplorationDepth = 4; 
     static int MaxExtraCaptureDepth = 5;
@@ -19,7 +20,7 @@ public class MyBot : IChessBot
     public int RunningAverageBoardEvaluations {get; private set;} = -1;
     static int ActivatedBits(ulong bitboard) => BitboardHelper.GetNumberOfSetBits(bitboard);
 
-    static MyBot(){
+    static SensiBot(){
         // create lookup tables for piece values
         WhitePieceValues = new float[5,8,8];
 
@@ -62,50 +63,7 @@ public class MyBot : IChessBot
 
     }
 
-    bool beSensible = false;
     public Move Think(Board board, Timer timer)
-    {
-        if (!beSensible)
-        {
-            if (board.GetLegalMoves(true).Count() > 2 || board.PlyCount > 20)
-            {
-                beSensible = true;
-            }
-            else
-            {
-                Console.WriteLine("Playing!");
-                return ThinkByPlaying(board, timer);
-            }
-        }
-        Console.WriteLine("Sensible!");
-        return ThinkSensibly(board, timer);
-    }
-
-    public Move ThinkByPlaying(Board board, Timer timer)
-    {
-        // Clear lookup table
-        PreviousEvaluations.Clear();
-
-        var bestEval = float.NegativeInfinity;
-        var bestMove = Move.NullMove;
-        foreach (var move in board.GetLegalMoves())
-        {
-            board.MakeMove(move);
-            var eval = -EvaluateByPlaying(board, 2, 2);
-
-            if (eval > bestEval)
-            {
-                bestMove = move;
-                bestEval = eval;
-            }
-
-            board.UndoMove(move);
-        }
-
-        return bestMove;
-    }
-
-    public Move ThinkSensibly(Board board, Timer timer)
     {
         // Clear lookup table
         PreviousEvaluations.Clear();
@@ -252,22 +210,6 @@ public class MyBot : IChessBot
         return bestComputation;
     }
 
-    private float EvaluateByPlaying(Board board, int botVisionDepth, int numberOfPlies)
-    {
-        var computation = EvaluateRecursively(board,
-                                              botVisionDepth,
-                                              float.NegativeInfinity,
-                                              float.PositiveInfinity);
-
-        if (numberOfPlies == 0 || computation.BestMove == Move.NullMove) return computation.Evaluation;
-
-        board.MakeMove(computation.BestMove);
-        var evaluation = -EvaluateByPlaying(board, botVisionDepth, numberOfPlies-1);
-        board.UndoMove(computation.BestMove);
-
-        return evaluation;
-    }
-
     private float EvaluateBoard(Board board) {
         var evaluationForWhite = 0.0f;
         var pieceLists = board.GetAllPieceLists();
@@ -349,33 +291,6 @@ public class MyBot : IChessBot
         {
             ExtraCaptureDepth = Math.Clamp(ExtraCaptureDepth, 0, MaxExtraCaptureDepth) - (ExplorationDepth + ExtraCaptureDepth) % 2;
         }
-    }
-}
-
-public struct Computation {
-
-    public List<Move> Line;
-    public float Evaluation {get; set;}
-    public int Depth {get; set; }
-    public int ExtraDepth {get; set; }
-    public readonly Move BestMove => Line.LastOrDefault(Move.NullMove);
-
-    public Computation(float evaluation, int depth){
-        Evaluation = evaluation;
-        Depth = Math.Min(depth,0);
-        ExtraDepth = Math.Max(-depth,0);
-        Line = new List<Move>();
-    }
-
-    public Computation Extend(Move move, int currentDepth) {
-        var extendedEval = new Computation(-Evaluation, currentDepth)
-        {
-            ExtraDepth = ExtraDepth,
-            Line = new(Line) // copy line
-        };
-        extendedEval.Line.Add(move); //add new move
-        extendedEval.Depth = currentDepth;
-        return extendedEval;
     }
 }
 
