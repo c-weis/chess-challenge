@@ -7,7 +7,7 @@ using ChessChallenge.Chess;
 namespace ChessChallenge.Debugging;
 static class Debugger{
     public static void OutputLatestComputationStats(MyBot bot, Chess.Board board){
-        Debug.WriteLine($"{bot.LastComputation.Summary(board)}| {bot.BoardEvaluationCounter:0}, {bot.RunningAverageBoardEvaluations:0}");
+        if (false) Debug.WriteLine($"{bot.LastComputation.Summary(board)}| {bot.BoardEvaluationCounter:0}");
     }    
 
     public static void OutputSummary(Computation computation, API.Board board){

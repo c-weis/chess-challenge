@@ -3,20 +3,28 @@ using ChessChallenge.API;
 using ChessChallenge.Debugging;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 
 public class MyBot : IChessBot
 {
+    // Parameters for Sensibot
     static int MaxExplorationDepth = 4; 
     static int MaxExtraCaptureDepth = 5;
     private int ExplorationDepth = MaxExplorationDepth;
     private int ExtraCaptureDepth = MaxExtraCaptureDepth;
+
+    // Parameters for Play bot
+    private int BotVisionDepth = 2; 
+    private int PlayDepth = 2;
+    static float StrategicalDiscrepancy = 0.5f;
+
+    // Other variables
     static float CheckMateValue = 1e6f; // Large, but finite value for checkmate.
     static float[,,] WhitePieceValues;
     private Dictionary<ulong, Computation> PreviousEvaluations {get; set;} = new(); // sends (board Zobrist key) => Computation
     public Computation LastComputation {get; set;}
     public int BoardEvaluationCounter {get; private set;} = 0;
-    public int RunningAverageBoardEvaluations {get; private set;} = -1;
     static int ActivatedBits(ulong bitboard) => BitboardHelper.GetNumberOfSetBits(bitboard);
 
     static MyBot(){
@@ -65,42 +73,55 @@ public class MyBot : IChessBot
     bool beSensible = false;
     public Move Think(Board board, Timer timer)
     {
-        if (!beSensible)
-        {
-            if (board.GetLegalMoves(true).Count() > 2 || board.PlyCount > 20)
-            {
-                beSensible = true;
-            }
-            else
-            {
-                Console.WriteLine("Playing!");
-                return ThinkByPlaying(board, timer);
-            }
-        }
-        Console.WriteLine("Sensible!");
-        return ThinkSensibly(board, timer);
-    }
+        float bestSensiEval = float.NegativeInfinity;
+        var moves = board.GetLegalMoves();
+        var moveEvals = new Dictionary<Move, float>();
 
-    public Move ThinkByPlaying(Board board, Timer timer)
-    {
-        // Clear lookup table
-        PreviousEvaluations.Clear();
+        DepthDecider(board, timer);
 
-        var bestEval = float.NegativeInfinity;
-        var bestMove = Move.NullMove;
-        foreach (var move in board.GetLegalMoves())
+        // First go through all moves and find the ones that, according to SensiBot, are within StrategicalDiscrepancy of the best move
+        foreach (var move in moves)
         {
             board.MakeMove(move);
-            var eval = -EvaluateByPlaying(board, 2, 2);
 
-            if (eval > bestEval)
-            {
-                bestMove = move;
-                bestEval = eval;
-            }
+            // Evaluate position recursively. Here the upper cutoff is increased by StrategicalDiscrepancy to not discard near top moves
+            float eval = -EvaluateRecursively(board, ExplorationDepth-1, float.NegativeInfinity, -(bestSensiEval-StrategicalDiscrepancy)).Evaluation;
+            moveEvals.Add(move, eval);
+            bestSensiEval = Math.Max(eval, bestSensiEval);
 
             board.UndoMove(move);
         }
+
+        Move bestMove = Move.NullMove;
+        float bestPlayEval = float.NegativeInfinity;
+        float howSensible = float.NegativeInfinity;
+
+        int numberOfMovesPassedOn = 0;
+
+        foreach(var moveEval in moveEvals) {
+            // only consider moves withing StrategicalDiscrepancy of the top move
+            if (moveEval.Value < bestSensiEval - StrategicalDiscrepancy) continue;
+
+            numberOfMovesPassedOn++;
+
+            board.MakeMove(moveEval.Key);
+
+            ExtraCaptureDepth = 2;
+            float eval = -EvaluateByPlaying(board, BotVisionDepth, PlayDepth);
+
+            if (eval > bestPlayEval)
+            {
+                bestMove = moveEval.Key;
+                bestPlayEval = eval;
+                howSensible = moveEval.Value;
+            }
+
+            board.UndoMove(moveEval.Key);
+        }
+
+        LastComputation = new Computation(bestPlayEval, ExplorationDepth);
+
+        Debug.WriteLine($"{bestPlayEval:0.00},  ({howSensible:0.00} < {bestSensiEval:0.00}) among {numberOfMovesPassedOn} moves");
 
         return bestMove;
     }
@@ -143,8 +164,6 @@ public class MyBot : IChessBot
                                         outputComputationSummaries: false
                                         );
         }
-
-        RunningAverageBoardEvaluations = (9*RunningAverageBoardEvaluations + BoardEvaluationCounter)/10;
 
         return LastComputation.BestMove;
     }
@@ -224,7 +243,7 @@ public class MyBot : IChessBot
 
             if (outputComputationSummaries)
             {
-                Debugger.OutputSummary(computation, board);
+                // Debugger.OutputSummary(computation, board);
             }
 
             if (computation.Evaluation >= bestEval)
