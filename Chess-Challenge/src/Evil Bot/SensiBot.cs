@@ -186,7 +186,6 @@ public class SensiBot: IChessBot
             {
                 // Disabled because incompatibility. (Debugger no longer uses struct Computation)
                 // Debugger.OutputSummary(computation, board);
-                Debug.WriteLine($"SensiBot {computation.Evaluation:0.00} ({computation.Depth}+{computation.ExtraDepth})");
             }
 
             if (computation.Evaluation >= bestEval)

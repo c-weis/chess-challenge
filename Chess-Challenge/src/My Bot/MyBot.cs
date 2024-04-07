@@ -10,7 +10,7 @@ public class MyBot : IChessBot
 {
     // Parameters for Sensibot
     static int MaxExplorationDepth = 3; 
-    static int MaxExtraCaptureDepth = 5;
+    static int MaxExtraCaptureDepth = 3;
     private int ExplorationDepth = MaxExplorationDepth;
     private int ExtraCaptureDepth = MaxExtraCaptureDepth;
 
@@ -366,32 +366,3 @@ public class MyBot : IChessBot
         }
     }
 }
-
-// public struct Computation {
-// 
-//     public List<Move> Line;
-//     public float Evaluation {get; set;}
-//     public int Depth {get; set; }
-//     public int ExtraDepth {get; set; }
-//     public readonly Move BestMove => Line.LastOrDefault(Move.NullMove);
-// 
-//     public Computation(float evaluation, int depth){
-//         Evaluation = evaluation;
-//         Depth = Math.Min(depth,0);
-//         ExtraDepth = Math.Max(-depth,0);
-//         Line = new List<Move>();
-//     }
-// 
-//     public Computation Extend(Move move, int currentDepth) {
-//         var extendedEval = new Computation(-Evaluation, currentDepth)
-//         {
-//             ExtraDepth = ExtraDepth,
-//             Line = new(Line) // copy line
-//         };
-//         extendedEval.Line.Add(move); //add new move
-//         extendedEval.Depth = currentDepth;
-//         return extendedEval;
-//     }
-// }
-// 
-// 
