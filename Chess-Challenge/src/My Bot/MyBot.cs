@@ -9,7 +9,7 @@ using System.Linq;
 public class MyBot : IChessBot
 {
     // Parameters for Sensibot
-    static int MaxExplorationDepth = 4; 
+    static int MaxExplorationDepth = 3; 
     static int MaxExtraCaptureDepth = 5;
     private int ExplorationDepth = MaxExplorationDepth;
     private int ExtraCaptureDepth = MaxExtraCaptureDepth;
@@ -22,8 +22,8 @@ public class MyBot : IChessBot
     // Other variables
     static float CheckMateValue = 1e6f; // Large, but finite value for checkmate.
     static float[,,] WhitePieceValues;
-    private Dictionary<ulong, Computation> PreviousEvaluations {get; set;} = new(); // sends (board Zobrist key) => Computation
-    public Computation LastComputation {get; set;}
+    public Dictionary<ulong, (float Evaluation, Move BestMove, int Depth)> EvaluationTable {get; set;} = new(); 
+    // sends (board Zobrist key) => (evaluation of the position, best move, depth of the search that found this (can be longer than actual line))
     public int BoardEvaluationCounter {get; private set;} = 0;
     static int ActivatedBits(ulong bitboard) => BitboardHelper.GetNumberOfSetBits(bitboard);
 
@@ -71,7 +71,7 @@ public class MyBot : IChessBot
     }
 
     bool beSensible = false;
-    public Move Think(Board board, Timer timer)
+    public Move ThinkBoth(Board board, Timer timer)
     {
         float bestSensiEval = float.NegativeInfinity;
         var moves = board.GetLegalMoves();
@@ -119,17 +119,15 @@ public class MyBot : IChessBot
             board.UndoMove(moveEval.Key);
         }
 
-        LastComputation = new Computation(bestPlayEval, ExplorationDepth);
-
         Debug.WriteLine($"{bestPlayEval:0.00},  ({howSensible:0.00} < {bestSensiEval:0.00}) among {numberOfMovesPassedOn} moves");
 
         return bestMove;
     }
 
-    public Move ThinkSensibly(Board board, Timer timer)
+    public Move Think(Board board, Timer timer)
     {
         // Clear lookup table
-        PreviousEvaluations.Clear();
+        EvaluationTable.Clear();
 
         // adapt depth based on time remaining
         DepthDecider(board, timer);
@@ -138,7 +136,7 @@ public class MyBot : IChessBot
         BoardEvaluationCounter = 0;
 
         // On the top level we still check the table, mainly to save the top level computations.
-        LastComputation = EvaluateRecursively(
+        var LastComputation = EvaluateRecursively(
                                     board, 
                                     ExplorationDepth,
                                     float.NegativeInfinity,
@@ -165,7 +163,7 @@ public class MyBot : IChessBot
                                         );
         }
 
-        return LastComputation.BestMove;
+        return LastComputation.Item2;
     }
 
     private static int MoveEvaluationOrder(Board board, Move move){
@@ -181,23 +179,23 @@ public class MyBot : IChessBot
     }
 
     // EvaluateRecursively searches for the best move on board up to depth, discarding any moves that are below minEval or above maxEval
-    public Computation EvaluateRecursively(Board board, int depth,
+    public (float Evaluation, Move BestMove) EvaluateRecursively(Board board, int depth,
                                             float lowerCutoff, float upperCutoff,
                                             bool outputComputationSummaries = false)
     {
 #if USE_COMPUTATION_TABLE
         // First, see if we evaluated this position already at sufficient depth
-        // XOR with plycount to account for repetitions
+        // XOR with plycount to account for repetitions (need to left shift plycount because last bit already xors with IsWhiteToMove)
         var zobristKey = board.ZobristKey ^ ((ulong)board.PlyCount << 1);
         // Every evaluation is stored from white's perspective
 
         bool keyExisted = false;
-        if (PreviousEvaluations.TryGetValue(zobristKey, out var previousEval))
+        if (EvaluationTable.TryGetValue(zobristKey, out var previousEval))
         {
             // we have seen this position before - check depth
             if (previousEval.Depth >= depth)
             {
-                return previousEval;
+                return (previousEval.Evaluation, previousEval.BestMove);
             }
             keyExisted = true;
             // else carry on - the position needs to be reevaluated
@@ -205,66 +203,64 @@ public class MyBot : IChessBot
 #endif
 
         // Deal with trivial cases first: checkmate, draw
-        if (board.IsInCheckmate()) return new Computation(-CheckMateValue * (1000 - board.PlyCount), 100);
-        if (board.IsDraw()) return new Computation(0, 100);
+        if (board.IsInCheckmate()) return (-CheckMateValue * (1000 - board.PlyCount), Move.NullMove);
+        if (board.IsDraw()) return (0, Move.NullMove);
 
         // Check if we need to stop the search for depth reasons
-        if (depth == -ExtraCaptureDepth) return new Computation(EvaluateBoard(board), depth);
+        if (depth == -ExtraCaptureDepth) return (EvaluateBoard(board), Move.NullMove);
         var moves = board.GetLegalMoves();
 
         // Sort moves (if remaining depth >= 0)
         var sortedMoves = (depth > 0) ? moves.OrderByDescending(move => MoveEvaluationOrder(board, move))
                                       : moves.AsEnumerable();
 
-        float bestEval = (depth > 0) ? float.NegativeInfinity : EvaluateBoard(board);
-        Computation bestComputation = new(bestEval, depth); // This should never be used if depth > 0
+        var bestComputation = ((depth > 0) ? float.NegativeInfinity : EvaluateBoard(board), Move.NullMove);
 
         // Loop through moves, recursively calling this function and employing alpha-beta pruning
         foreach (var move in sortedMoves)
         {
-            board.MakeMove(move);
-
             // at depth <= 0, only look for captures and checks! (we're not sorting at this depth so can do this here)
-            if (depth <= 0 && !move.IsCapture && !board.IsInCheck())
-            {
-                board.UndoMove(move);
-                continue;
-            }
+            if (depth <= 0 && !move.IsCapture && !board.IsInCheck()) continue;
 
-            var computation = EvaluateRecursively(
+            board.MakeMove(move);
+            // Get recursive evalutation
+            var recursiveEval = EvaluateRecursively(
                                     board,
                                     depth - 1,
                                     -upperCutoff,
                                     -lowerCutoff
                                     );
-
-            computation = computation.Extend(move, depth);
             board.UndoMove(move);
 
-            if (outputComputationSummaries)
-            {
-                // Debugger.OutputSummary(computation, board);
-            }
+            // Don't further consider evaluations that were interrupted by a cutoff
+            if (float.IsNaN(recursiveEval.Evaluation)) continue;
+            // Adjust evalutation to current players perspective
+            recursiveEval.Evaluation *= -1;
 
-            if (computation.Evaluation >= bestEval)
+
+            // Disabled output summaries (the old version still uses the struct Computation)
+            // if (outputComputationSummaries) { Debugger.OutputSummary(computation, board); }
+
+            if (recursiveEval.Evaluation > bestComputation.Item1)
             {
-                lowerCutoff = Math.Max(lowerCutoff, computation.Evaluation);
-                bestEval = computation.Evaluation;
-                bestComputation = computation;
+                lowerCutoff = Math.Max(lowerCutoff, recursiveEval.Evaluation);
+                bestComputation = (recursiveEval.Evaluation, move);
+
                 if (lowerCutoff > upperCutoff)
                 {
                     // too good to be true. this should not be saved in the PreviousEvaluations
+                    bestComputation = (float.NaN, Move.NullMove);
                     break;
                 }
             }
         }
 
 #if USE_COMPUTATION_TABLE
-        if (lowerCutoff <= bestComputation.Evaluation && bestComputation.Evaluation <= upperCutoff)
+        if (!float.IsNaN(bestComputation.Item1))
         {
-            // This evaluation was not cut off and can be trusted, so we save it
-            if (!keyExisted) PreviousEvaluations.Add(zobristKey, default);
-            PreviousEvaluations[zobristKey] = bestComputation;
+            // This evaluation was not cut off and can be trusted, so we save it together with the current depth
+            if (!keyExisted) EvaluationTable.Add(zobristKey, default);
+            EvaluationTable[zobristKey] = (bestComputation.Item1, bestComputation.Item2, depth);
         }
 #endif
 
@@ -371,30 +367,31 @@ public class MyBot : IChessBot
     }
 }
 
-public struct Computation {
-
-    public List<Move> Line;
-    public float Evaluation {get; set;}
-    public int Depth {get; set; }
-    public int ExtraDepth {get; set; }
-    public readonly Move BestMove => Line.LastOrDefault(Move.NullMove);
-
-    public Computation(float evaluation, int depth){
-        Evaluation = evaluation;
-        Depth = Math.Min(depth,0);
-        ExtraDepth = Math.Max(-depth,0);
-        Line = new List<Move>();
-    }
-
-    public Computation Extend(Move move, int currentDepth) {
-        var extendedEval = new Computation(-Evaluation, currentDepth)
-        {
-            ExtraDepth = ExtraDepth,
-            Line = new(Line) // copy line
-        };
-        extendedEval.Line.Add(move); //add new move
-        extendedEval.Depth = currentDepth;
-        return extendedEval;
-    }
-}
-
+// public struct Computation {
+// 
+//     public List<Move> Line;
+//     public float Evaluation {get; set;}
+//     public int Depth {get; set; }
+//     public int ExtraDepth {get; set; }
+//     public readonly Move BestMove => Line.LastOrDefault(Move.NullMove);
+// 
+//     public Computation(float evaluation, int depth){
+//         Evaluation = evaluation;
+//         Depth = Math.Min(depth,0);
+//         ExtraDepth = Math.Max(-depth,0);
+//         Line = new List<Move>();
+//     }
+// 
+//     public Computation Extend(Move move, int currentDepth) {
+//         var extendedEval = new Computation(-Evaluation, currentDepth)
+//         {
+//             ExtraDepth = ExtraDepth,
+//             Line = new(Line) // copy line
+//         };
+//         extendedEval.Line.Add(move); //add new move
+//         extendedEval.Depth = currentDepth;
+//         return extendedEval;
+//     }
+// }
+// 
+// 
