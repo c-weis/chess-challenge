@@ -8,13 +8,20 @@ using System.Linq;
 using System.Net;
 using System.Runtime.InteropServices;
 
-public class MyBot : IChessBot
+namespace ChessChallenge.EvilBots;
+
+public class PlayBot : IChessBot
 {
     // Parameters for Sensibot
     static int MaxExplorationDepth = 3; 
-    static int MaxExtraCaptureDepth = 5;
+    static int MaxExtraCaptureDepth = 3;
     private int ExplorationDepth = MaxExplorationDepth;
     private int ExtraCaptureDepth = MaxExtraCaptureDepth;
+
+    // Parameters for Play bot
+    private int BotVisionDepth = 2; 
+    private int PlayDepth = 7;
+    static float StrategicalDiscrepancy = 0.5f + float.PositiveInfinity;
 
     // Other variables
     static float CheckMateValue = 1e6f; // Large, but finite value for checkmate.
@@ -24,7 +31,7 @@ public class MyBot : IChessBot
     public int BoardEvaluationCounter {get; private set;} = 0;
     static int ActivatedBits(ulong bitboard) => BitboardHelper.GetNumberOfSetBits(bitboard);
 
-    static MyBot(){
+    static PlayBot(){
         // create lookup tables for piece values
         WhitePieceValues = new float[5,8,8];
 
@@ -67,7 +74,81 @@ public class MyBot : IChessBot
 
     }
 
+    bool beSensible = false;
     public Move Think(Board board, Timer timer)
+    {
+        float bestSensiEval = float.NegativeInfinity;
+        var moves = board.GetLegalMoves();
+        var moveEvals = new Dictionary<Move, float>();
+
+        DepthDecider(board, timer);
+
+        // First go through all moves and find the ones that, according to SensiBot, are within StrategicalDiscrepancy of the best move
+        foreach (var move in moves)
+        {
+            board.MakeMove(move);
+
+            // Evaluate position recursively. Here the upper cutoff is increased by StrategicalDiscrepancy to not discard near top moves
+            float eval = -EvaluateRecursively(board, 0, float.NegativeInfinity, float.PositiveInfinity).Evaluation;
+            // float eval = -EvaluateRecursively(board, ExplorationDepth-1, float.NegativeInfinity, -(bestSensiEval-StrategicalDiscrepancy)).Evaluation;
+            moveEvals.Add(move, eval);
+            if (eval > bestSensiEval) {
+                bestSensiEval = eval;
+            }
+
+            board.UndoMove(move);
+        }
+
+        Move bestMove = Move.NullMove;
+        float bestPlayEval = float.NegativeInfinity;
+        float howSensible = float.NegativeInfinity;
+
+        int numberOfMovesPassedOn = 0;
+
+        foreach(var moveEval in moveEvals) {
+            // only consider moves within StrategicalDiscrepancy of the top move
+            if (moveEval.Value < bestSensiEval - StrategicalDiscrepancy) {
+                continue;
+            }
+
+            numberOfMovesPassedOn++;
+
+            board.MakeMove(moveEval.Key);
+
+            ExtraCaptureDepth = 2;
+            float eval = -EvaluateByPlaying(board, BotVisionDepth, PlayDepth);
+
+            if (eval > bestPlayEval)
+            {
+                bestMove = moveEval.Key;
+                bestPlayEval = eval;
+                howSensible = moveEval.Value;
+            }
+
+            var response = EvaluateRecursively(board,
+                                              BotVisionDepth,
+                                              float.NegativeInfinity,
+                                              float.PositiveInfinity).BestMove;
+
+            board.UndoMove(moveEval.Key);
+
+            Debug.Print($"   {moveEval.Key.ToString()} -> {response}  ({eval:0.00})");
+        }
+
+        // Add current board and best move to EvaluationTable so the debugger knows where to start outputting the line
+        var zobristKey = board.ZobristKey ^ ((ulong)board.PlyCount << 1);
+        if (!EvaluationTable.ContainsKey(zobristKey)) EvaluationTable.Add(zobristKey, default);
+        EvaluationTable[zobristKey] = (Evaluation: bestPlayEval, BestMove: bestMove, Depth: PlayDepth+BotVisionDepth);
+
+        // board.MakeMove(bestMove);
+        // ChessChallenge.Debugging.Debugger.OutputSummary(EvaluationTable, board);
+        // board.UndoMove(bestMove);
+        Debug.WriteLine($"{bestPlayEval:0.00},  ({howSensible:0.00} < {bestSensiEval:0.00}) among {numberOfMovesPassedOn} moves");
+
+        return bestMove;
+    }
+
+    public Move ThinkSensible(Board board, Timer timer)
     {
         // Clear lookup table
         EvaluationTable.Clear();
