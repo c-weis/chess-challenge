@@ -11,7 +11,7 @@ using System.Linq;
 public class MyBot : IChessBot
 {
     // Parameters for Sensibot
-    static int MaxExplorationDepth = 3; 
+    static int MaxExplorationDepth = 4; 
     static int MaxExtraCaptureDepth = 5;
     private int ExplorationDepth = MaxExplorationDepth;
     private int ExtraCaptureDepth = MaxExtraCaptureDepth;
