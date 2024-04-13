@@ -24,7 +24,8 @@ static class Debugger{
 
     public static StringBuilder Summary(Dictionary<ulong, (float Evaluation, API.Move BestMove, int Depth)> EvaluationTable, Chess.Board board) {
         ulong zobristKey = board.ZobristKey ^ ((ulong)board.plyCount << 1);
-        var startingEval = EvaluationTable[zobristKey];
+        // var startingEval = EvaluationTable[zobristKey];
+        if (!EvaluationTable.TryGetValue(zobristKey, out var startingEval)) return new StringBuilder("no key found");
         StringBuilder stringBuilder = new(
             $"{EvaluationToString(startingEval.Evaluation, board.plyCount)} ({startingEval.Depth}) "
         );
