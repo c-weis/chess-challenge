@@ -1,12 +1,12 @@
 ﻿#define USE_COMPUTATION_TABLE
 using ChessChallenge.API;
-using ChessChallenge.Debugging;
+// using ChessChallenge.Debugging;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
+// using System.Diagnostics;
 using System.Linq;
-using System.Net;
-using System.Runtime.InteropServices;
+// using System.Net;
+// using System.Runtime.InteropServices;
 
 public class MyBot : IChessBot
 {
@@ -208,22 +208,6 @@ public class MyBot : IChessBot
 #endif
 
         return bestComputation;
-    }
-
-    private float EvaluateByPlaying(Board board, int botVisionDepth, int numberOfPlies)
-    {
-        var computation = EvaluateRecursively(board,
-                                              botVisionDepth,
-                                              float.NegativeInfinity,
-                                              float.PositiveInfinity);
-
-        if (numberOfPlies == 0 || computation.BestMove == Move.NullMove) return computation.Evaluation;
-
-        board.MakeMove(computation.BestMove);
-        var evaluation = -EvaluateByPlaying(board, botVisionDepth, numberOfPlies-1);
-        board.UndoMove(computation.BestMove);
-
-        return evaluation;
     }
 
     private float EvaluateBoard(Board board) {
