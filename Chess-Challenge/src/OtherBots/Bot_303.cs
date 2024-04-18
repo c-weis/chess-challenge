@@ -1,3 +1,4 @@
+// Modified from the version made available on SebLague/Tiny-Chess-Bot-Challenge-Results
 // Electric shockwave gambit 
 
 #define ELECTRIC_SHOCKWAVE_GAMBIT

@@ -1,3 +1,4 @@
+// Modified from the version made available on SebLague/Tiny-Chess-Bot-Challenge-Results
 // 200 Tokens Monstrosity   #119 in Swiss 
 
 namespace ChessChallenge.EvilBots;

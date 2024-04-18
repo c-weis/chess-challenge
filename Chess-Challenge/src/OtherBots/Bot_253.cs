@@ -1,4 +1,5 @@
-// Squeedo  #159 in Swiss
+// Modified from the version made available on SebLague/Tiny-Chess-Bot-Challenge-Results
+// Squeedo, placed #159 in Swiss
 
 namespace ChessChallenge.EvilBots;
 using ChessChallenge.API;

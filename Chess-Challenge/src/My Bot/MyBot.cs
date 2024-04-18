@@ -1,12 +1,8 @@
 ﻿#define USE_COMPUTATION_TABLE
 using ChessChallenge.API;
-// using ChessChallenge.Debugging;
 using System;
 using System.Collections.Generic;
-// using System.Diagnostics;
 using System.Linq;
-// using System.Net;
-// using System.Runtime.InteropServices;
 
 public class MyBot : IChessBot
 {
@@ -292,6 +288,4 @@ public class MyBot : IChessBot
             ExtraCaptureDepth = Math.Clamp(ExtraCaptureDepth, 0, MaxExtraCaptureDepth) - (ExplorationDepth + ExtraCaptureDepth) % 2;
         }
     }
-
-
 }
